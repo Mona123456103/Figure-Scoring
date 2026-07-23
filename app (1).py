@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+"""
+Barracuda Tracker — Web App
+===========================================================================
+Streamlit front-end for tracker_core.py.
+
+Three modes:
+  - Walticam: single split-screen video (top=above, bottom=below)
+  - Above / Below: separate above-water and/or underwater videos
+
+Run locally:
+    streamlit run app.py
+
+Deploy: push this folder to a Hugging Face Space or Streamlit Cloud.
+"""
+
+import streamlit as st
+import tempfile
+import time
+from pathlib import Path
+
+import tracker_core as tc
+
+st.set_page_config(
+    page_title="Barracuda Tracker",
+    layout="centered",
+)
+
+st.title("Barracuda Tracker")
+st.caption(
+    "Upload synchronized swimming footage to get pose tracking, waterline "
+    "detection, and downloadable data."
+)
+
+# ── Fixed processing defaults (no settings panel) ─────────────────────────
+# Matches the original standalone scripts: RTMPose-x in 'performance' mode,
+# detecting every frame (det_frequency=1). Slower on this shared CPU server,
+# but this is what gives correct, locked-on tracking rather than the
+# skeleton drifting onto the background.
+chosen = dict(mode="performance", det_frequency=1)
+waterline_value = None
+max_duration = 60
+
+# ── Source toggle: Walticam vs Above/Below ────────────────────────────────
+source = st.radio(
+    "Camera source", options=["Walticam", "Above / Below"],
+    horizontal=True, label_visibility="collapsed",
+)
+
+above_water = True
+below_water = True
+if source == "Above / Below":
+    col1, col2 = st.columns(2)
+    with col1:
+        above_water = st.checkbox("Above Water", value=True)
+    with col2:
+        below_water = st.checkbox("Below Water", value=True)
+    if not above_water and not below_water:
+        st.warning("Select at least one of Above Water / Below Water.")
+
+
+def run_with_progress(label):
+    """Returns (progress_bar, update_progress_fn) pair for a processing step."""
+    progress_bar = st.progress(0.0, text=f"Starting {label}...")
+    start_time = time.time()
+
+    def update_progress(frame_count, total_frames):
+        if total_frames > 0:
+            pct = min(frame_count / total_frames, 1.0)
+            elapsed = time.time() - start_time
+            fps_proc = frame_count / elapsed if elapsed > 0 else 0
+            eta = (total_frames - frame_count) / fps_proc if fps_proc > 0 else 0
+            progress_bar.progress(
+                pct, text=f"{label}: frame {frame_count}/{total_frames} (~{eta:.0f}s remaining)"
+            )
+    return progress_bar, update_progress
+
+
+def show_results(label, video_path, csv_path, landmarks):
+    kalman_csv = tc.apply_kalman_filter_to_csv(csv_path, landmarks)
+    st.success(f"{label} processing complete!")
+    st.video(str(video_path))
+    col1, col2 = st.columns(2)
+    with col1:
+        with open(video_path, "rb") as f:
+            st.download_button(
+                f"Download {label} Video", data=f.read(),
+                file_name=Path(video_path).name, mime="video/mp4",
+                use_container_width=True, key=f"video_{label}",
+            )
+    with col2:
+        with open(kalman_csv, "rb") as f:
+            st.download_button(
+                f"Download {label} Data (CSV)", data=f.read(),
+                file_name=Path(kalman_csv).name, mime="text/csv",
+                use_container_width=True, key=f"csv_{label}",
+            )
+
+
+MAX_SIZE_MB = 300
+
+# ============================================================================
+# WALTICAM MODE — single split-screen video
+# ============================================================================
+if source == "Walticam":
+    uploaded_file = st.file_uploader(
+        "Upload your WaltiCam video (split-screen: top=above, bottom=below)",
+        type=["mp4", "mov", "m4v", "avi"],
+    )
+
+    if uploaded_file is not None:
+        file_size_mb = uploaded_file.size / (1024 * 1024)
+        st.info(f"{uploaded_file.name} ({file_size_mb:.1f} MB)")
+
+        if file_size_mb > MAX_SIZE_MB:
+            st.error(f"File is too large ({file_size_mb:.0f} MB). Please upload a video under {MAX_SIZE_MB} MB.")
+        elif st.button("Process Video", type="primary", use_container_width=True):
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                input_path = Path(tmp_dir) / uploaded_file.name
+                with open(input_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                output_path = Path(tmp_dir) / f"{input_path.stem}_walticam_tracking.mp4"
+
+                progress_bar, update_progress = run_with_progress("Walticam")
+                try:
+                    with st.spinner("Loading pose model (first run downloads it, ~1 min)..."):
+                        video_file, above_csv, below_csv = tc.process_video_walticam(
+                            str(input_path), output_path,
+                            mode=chosen["mode"], det_frequency=chosen["det_frequency"],
+                            max_duration=max_duration, progress_callback=update_progress,
+                        )
+                    progress_bar.progress(1.0, text="Done!")
+
+                    above_kalman = tc.apply_kalman_filter_to_csv(above_csv, tc.ALL_LANDMARKS_ABOVE)
+                    below_kalman = tc.apply_kalman_filter_to_csv(below_csv, tc.ALL_LANDMARKS_ABOVE)
+
+                    st.success("Walticam processing complete!")
+                    st.video(str(video_file))
+
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        with open(video_file, "rb") as f:
+                            st.download_button("Combined Video", data=f.read(),
+                                                file_name=Path(video_file).name, mime="video/mp4",
+                                                use_container_width=True)
+                    with col2:
+                        with open(above_kalman, "rb") as f:
+                            st.download_button("Above Data (CSV)", data=f.read(),
+                                                file_name=Path(above_kalman).name, mime="text/csv",
+                                                use_container_width=True)
+                    with col3:
+                        with open(below_kalman, "rb") as f:
+                            st.download_button("Below Data (CSV)", data=f.read(),
+                                                file_name=Path(below_kalman).name, mime="text/csv",
+                                                use_container_width=True)
+                except Exception as e:
+                    st.error(f"Something went wrong during processing: {e}")
+                    st.exception(e)
+
+# ============================================================================
+# ABOVE / BELOW MODE — separate videos, per checkbox
+# ============================================================================
+else:
+    above_file, below_file = None, None
+
+    if above_water:
+        above_file = st.file_uploader(
+            "Upload above-water video", type=["mp4", "mov", "m4v", "avi"], key="above_upload"
+        )
+    if below_water:
+        below_file = st.file_uploader(
+            "Upload underwater video", type=["mp4", "mov", "m4v", "avi"], key="below_upload"
+        )
+
+    ready = (not above_water or above_file is not None) and (not below_water or below_file is not None)
+    any_selected = above_water or below_water
+
+    if any_selected and ready and (above_file is not None or below_file is not None):
+        oversized = []
+        if above_file is not None and above_file.size / (1024 * 1024) > MAX_SIZE_MB:
+            oversized.append(above_file.name)
+        if below_file is not None and below_file.size / (1024 * 1024) > MAX_SIZE_MB:
+            oversized.append(below_file.name)
+
+        if oversized:
+            st.error(f"These files are too large (over {MAX_SIZE_MB} MB): {', '.join(oversized)}")
+        elif st.button("Process Video(s)", type="primary", use_container_width=True):
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                try:
+                    with st.spinner("Loading pose model (first run downloads it, ~1 min)..."):
+                        if above_water and above_file is not None:
+                            above_input = Path(tmp_dir) / above_file.name
+                            with open(above_input, "wb") as f:
+                                f.write(above_file.getbuffer())
+                            above_output = Path(tmp_dir) / f"{above_input.stem}_above_tracking.mp4"
+
+                            _, update_above = run_with_progress("Above-water")
+                            video_file, csv_file = tc.process_video_above_water(
+                                str(above_input), above_output, waterline_value,
+                                mode=chosen["mode"], det_frequency=chosen["det_frequency"],
+                                max_duration=max_duration, progress_callback=update_above,
+                            )
+                            show_results("Above-Water", video_file, csv_file, tc.ALL_LANDMARKS_ABOVE)
+
+                        if below_water and below_file is not None:
+                            below_input = Path(tmp_dir) / below_file.name
+                            with open(below_input, "wb") as f:
+                                f.write(below_file.getbuffer())
+                            below_output = Path(tmp_dir) / f"{below_input.stem}_below_tracking.mp4"
+
+                            _, update_below = run_with_progress("Underwater")
+                            video_file, csv_file = tc.process_video_underwater(
+                                str(below_input), below_output, waterline_value,
+                                mode=chosen["mode"], det_frequency=chosen["det_frequency"],
+                                max_duration=max_duration, progress_callback=update_below,
+                            )
+                            show_results("Underwater", video_file, csv_file, tc.ALL_LANDMARKS_UNDERWATER)
+
+                except Exception as e:
+                    st.error(f"Something went wrong during processing: {e}")
+                    st.exception(e)
+
+st.divider()
+with st.expander("About this tracker"):
+    st.markdown(
+        """
+        This tool uses **RTMPose-x** (via `rtmlib`) for pose detection, with three modes:
+
+        - **Walticam**: a single split-screen video (top half = above-water,
+          bottom half = underwater), tracked with two lightweight RTMPose
+          instances running in tandem.
+        - **Above / Below**: separate above-water and/or underwater videos,
+          each run through a dedicated tracker with:
+            - Physical tent/background masking (above-water only)
+            - Blue water color validation to reject tents and pool deck (above-water only)
+            - Automatic waterline detection
+            - Swimmer locking across frames
+            - Multi-level smoothing and Kalman filtering
+            - A synthesized `mid_spine` point (underwater only) for back-curvature measurements
+
+        Output includes an annotated video with the detected skeleton and
+        waterline, plus a CSV of per-frame joint positions for further analysis.
+        """
+    )
