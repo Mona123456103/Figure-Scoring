@@ -23,74 +23,19 @@ import tracker_core as tc
 
 st.set_page_config(
     page_title="Barracuda Tracker",
-    page_icon="🏊",
     layout="centered",
 )
 
-st.title("🏊 Barracuda Tracker")
+st.title("Barracuda Tracker")
 st.caption(
     "Upload synchronized swimming footage to get pose tracking, waterline "
     "detection, and downloadable data."
 )
 
-# ── Sidebar settings ──────────────────────────────────────────────────────
-with st.sidebar:
-    st.header("Settings")
-
-    speed_choice = st.select_slider(
-        "Speed vs. accuracy",
-        options=["Fast", "Balanced", "Most Accurate"],
-        value="Fast",
-        help=(
-            "Fast: quickest results, good for previewing.\n"
-            "Balanced: recommended default.\n"
-            "Most Accurate: best joint precision, slowest (can take several "
-            "minutes per video on this free server)."
-        ),
-    )
-    speed_map = {
-        "Fast": dict(mode="lightweight", det_frequency=4),
-        "Balanced": dict(mode="balanced", det_frequency=2),
-        "Most Accurate": dict(mode="performance", det_frequency=1),
-    }
-    chosen = speed_map[speed_choice]
-
-    st.divider()
-    manual_waterline = st.checkbox("Set waterline manually (Above/Below only)", value=False)
-    waterline_value = None
-    if manual_waterline:
-        waterline_value = st.slider(
-            "Waterline position (fraction from top of frame)",
-            min_value=0.30, max_value=0.95, value=0.70, step=0.01,
-        )
-
-    st.divider()
-    max_duration = st.slider(
-        "Max figure duration to track (seconds)",
-        min_value=10, max_value=90, value=60, step=5,
-        help="Processing stops after this many seconds to keep runtimes reasonable.",
-    )
-
-    st.divider()
-    st.caption(
-        "⏱️ This app runs on shared CPU hardware. A 30–60 second clip can "
-        "take a few minutes to process, especially on 'Most Accurate'."
-    )
-
-# ── Pill-button styling for the segmented controls below ──────────────────
-st.markdown(
-    """
-    <style>
-    div[role="radiogroup"] {
-        display: flex; gap: 4px; background: rgba(120,120,120,0.12);
-        padding: 4px; border-radius: 999px; width: fit-content;
-    }
-    div[role="radiogroup"] label { border-radius: 999px !important; padding: 6px 20px !important; margin: 0 !important; }
-    div[role="radiogroup"] label div:first-child { display: none; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# ── Fixed processing defaults (no settings panel) ─────────────────────────
+chosen = dict(mode="lightweight", det_frequency=4)
+waterline_value = None
+max_duration = 60
 
 # ── Source toggle: Walticam vs Above/Below ────────────────────────────────
 source = st.radio(
@@ -129,20 +74,20 @@ def run_with_progress(label):
 
 def show_results(label, video_path, csv_path, landmarks):
     kalman_csv = tc.apply_kalman_filter_to_csv(csv_path, landmarks)
-    st.success(f"✅ {label} processing complete!")
+    st.success(f"{label} processing complete!")
     st.video(str(video_path))
     col1, col2 = st.columns(2)
     with col1:
         with open(video_path, "rb") as f:
             st.download_button(
-                f"⬇️ Download {label} Video", data=f.read(),
+                f"Download {label} Video", data=f.read(),
                 file_name=Path(video_path).name, mime="video/mp4",
                 use_container_width=True, key=f"video_{label}",
             )
     with col2:
         with open(kalman_csv, "rb") as f:
             st.download_button(
-                f"⬇️ Download {label} Data (CSV)", data=f.read(),
+                f"Download {label} Data (CSV)", data=f.read(),
                 file_name=Path(kalman_csv).name, mime="text/csv",
                 use_container_width=True, key=f"csv_{label}",
             )
@@ -161,11 +106,11 @@ if source == "Walticam":
 
     if uploaded_file is not None:
         file_size_mb = uploaded_file.size / (1024 * 1024)
-        st.info(f"📁 {uploaded_file.name} ({file_size_mb:.1f} MB)")
+        st.info(f"{uploaded_file.name} ({file_size_mb:.1f} MB)")
 
         if file_size_mb > MAX_SIZE_MB:
             st.error(f"File is too large ({file_size_mb:.0f} MB). Please upload a video under {MAX_SIZE_MB} MB.")
-        elif st.button("🚀 Process Video", type="primary", use_container_width=True):
+        elif st.button("Process Video", type="primary", use_container_width=True):
             with tempfile.TemporaryDirectory() as tmp_dir:
                 input_path = Path(tmp_dir) / uploaded_file.name
                 with open(input_path, "wb") as f:
@@ -185,23 +130,23 @@ if source == "Walticam":
                     above_kalman = tc.apply_kalman_filter_to_csv(above_csv, tc.ALL_LANDMARKS_ABOVE)
                     below_kalman = tc.apply_kalman_filter_to_csv(below_csv, tc.ALL_LANDMARKS_ABOVE)
 
-                    st.success("✅ Walticam processing complete!")
+                    st.success("Walticam processing complete!")
                     st.video(str(video_file))
 
                     col1, col2, col3 = st.columns(3)
                     with col1:
                         with open(video_file, "rb") as f:
-                            st.download_button("⬇️ Combined Video", data=f.read(),
+                            st.download_button("Combined Video", data=f.read(),
                                                 file_name=Path(video_file).name, mime="video/mp4",
                                                 use_container_width=True)
                     with col2:
                         with open(above_kalman, "rb") as f:
-                            st.download_button("⬇️ Above Data (CSV)", data=f.read(),
+                            st.download_button("Above Data (CSV)", data=f.read(),
                                                 file_name=Path(above_kalman).name, mime="text/csv",
                                                 use_container_width=True)
                     with col3:
                         with open(below_kalman, "rb") as f:
-                            st.download_button("⬇️ Below Data (CSV)", data=f.read(),
+                            st.download_button("Below Data (CSV)", data=f.read(),
                                                 file_name=Path(below_kalman).name, mime="text/csv",
                                                 use_container_width=True)
                 except Exception as e:
@@ -235,7 +180,7 @@ else:
 
         if oversized:
             st.error(f"These files are too large (over {MAX_SIZE_MB} MB): {', '.join(oversized)}")
-        elif st.button("🚀 Process Video(s)", type="primary", use_container_width=True):
+        elif st.button("Process Video(s)", type="primary", use_container_width=True):
             with tempfile.TemporaryDirectory() as tmp_dir:
                 try:
                     with st.spinner("Loading pose model (first run downloads it, ~1 min)..."):
@@ -272,7 +217,7 @@ else:
                     st.exception(e)
 
 st.divider()
-with st.expander("ℹ️ About this tracker"):
+with st.expander("About this tracker"):
     st.markdown(
         """
         This tool uses **RTMPose-x** (via `rtmlib`) for pose detection, with three modes:
