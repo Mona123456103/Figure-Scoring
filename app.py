@@ -183,22 +183,46 @@ def show_score(above_kalman_csv, below_kalman_csv=None, name="figure"):
     st.caption(f"Assessment: **{assess}**")
 
     d = result["deductions"]
-    rows = [
+    scored_rows = [
         ("Ascent alignment", d.get("ascent_alignment", 0), d.get("ascent_alignment_degrees")),
         ("Descent alignment", d.get("descent_alignment", 0), d.get("descent_alignment_degrees")),
         ("Backpike", d.get("backpike", 0), d.get("backpike_degrees")),
-        ("Leg extension (not counted)", d.get("leg_extension", 0), d.get("leg_extension_degrees")),
+        ("Leg extension", d.get("leg_extension", 0), d.get("leg_extension_degrees")),
+        ("Ankle extension", d.get("ankle_extension", 0), d.get("ankle_extension_degrees")),
+        ("Back roundness", d.get("back_roundness", 0), d.get("back_roundness_degrees")),
+        ("Travel", d.get("travel", 0), d.get("travel_degrees")),
+        ("Unroll speed", d.get("unroll_speed", 0), d.get("unroll_speed_degrees")),
+        ("Head tuck (not yet calibrated)", d.get("head_tuck", 0), d.get("head_tuck_degrees")),
     ]
+    st.markdown("**Official deductions**")
     st.table({
-        "Category": [r[0] for r in rows],
-        "Deduction": [f"-{r[1]:.2f}" if r[1] else "—" for r in rows],
-        "Measured (°)": [f"{r[2]:.1f}" if r[2] is not None else "—" for r in rows],
+        "Category": [r[0] for r in scored_rows],
+        "Deduction": [f"-{r[1]:.2f}" if r[1] else "—" for r in scored_rows],
+        "Measured": [f"{r[2]:.2f}" if r[2] is not None else "—" for r in scored_rows],
     })
+
+    coaching_rows = [
+        ("Underwater bent knee", d.get("underwater_bent_knee", 0), d.get("underwater_bent_knee_degrees")),
+        ("Back layout depth (not yet calibrated)", d.get("back_layout_depth", 0), d.get("back_layout_depth_value")),
+    ]
+    st.markdown("**Coaching feedback** _(measured, not counted toward the score)_")
+    st.table({
+        "Category": [r[0] for r in coaching_rows],
+        "Deduction": [f"-{r[1]:.2f}" if r[1] else "—" for r in coaching_rows],
+        "Measured": [f"{r[2]:.2f}" if r[2] is not None else "—" for r in coaching_rows],
+    })
+
+    st.caption(
+        "ℹ️ Leg/ankle/underwater-knee tiers, back roundness cutoff, and the "
+        "coaching-vs-official split come from the judges' meeting notes. "
+        "Head tuck and back layout depth are measured placeholders (always "
+        "0) pending exact point values from the judges."
+    )
 
     if below_kalman_csv is None:
         st.caption(
-            "ℹ️ No underwater video was processed, so this score is based on "
-            "above-water measurements only (height, alignment, backpike)."
+            "ℹ️ No underwater video was processed, so underwater-only "
+            "coaching feedback (bent knee, back layout depth) isn't available."
         )
 
 
