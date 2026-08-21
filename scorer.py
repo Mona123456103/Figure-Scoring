@@ -5,8 +5,8 @@ BARRACUDA FIGURE SCORER — FINA Height-Based + Blended Deductions
 Scoring approach:
   1. HEIGHT establishes a BASE SCORE from the FINA height chart
   2. DEDUCTIONS are 70% absolute (FINA standard) + 30% relative (group rank)
-  3. Deductions are now on a smooth 0.1-increment scale (interpolated
-     between calibration anchor points) instead of big 0.2/0.5/1.0 jumps.
+  3. Deductions are on a smooth 0.1-increment scale (interpolated between
+     calibration anchor points) instead of big 0.2/0.5/1.0 jumps.
 
 OFFICIAL deduction categories (count toward the score):
   1. Vertical alignment  — body tilt during ascent and descent (above water)
@@ -68,6 +68,22 @@ NOT treat these numbers as judge-approved until confirmed):
     like the more consistent predictor, we can build a new
     `_height_base_score` chart calibrated around it.
 
+============================================================================
+PEAK-FRAME AVERAGING (added after the above calibration log)
+============================================================================
+`foot_clearance` (and therefore `base_score`) used to come from a single
+frame — whichever frame had the single highest ankle point in the whole
+clip. A tracking glitch on exactly that one frame could throw the whole
+base score off with nothing to catch it. `foot_clearance` is now the
+MEDIAN of the top PEAK_AVERAGE_WINDOW (default 4) highest-ankle frames in
+a small window around the detected peak, instead of that one frame's raw
+value — median specifically because it's robust to one remaining outlier
+even within the small averaged window. `peak_frame` itself (used to
+window the ascent/descent/backpike measurements) is unchanged, so this
+only smooths the height number, not everything else. `body_scale`
+already worked this way (median over a window around peak_frame); this
+just brings `foot_clearance` in line with that same approach.
+
 USAGE:
     scorer = BarracudaScorer('/Users/mona/.../WaltiCam')
     scorer.score_all()
@@ -90,6 +106,10 @@ class BarracudaScorer:
     # subtracted from the official score, or only shown as feedback.
     # DEFAULT: feedback only. Flip to True once the judges decide.
     INCLUDE_COACHING_IN_SCORE = False
+
+    # How many of the highest-ankle frames near the peak get averaged
+    # (via median) into foot_clearance, instead of trusting one frame.
+    PEAK_AVERAGE_WINDOW = 4
 
     def __init__(self, data_dir):
         self.data_dir = Path(data_dir) if data_dir is not None else None
@@ -277,15 +297,6 @@ class BarracudaScorer:
         return 3.0
 
     # ── Graduated (0.1-increment) deduction scale ──
-    #
-    # Replaces the old hard-jump tables (0 / 0.2 / 0.5 / 1.0) with linear
-    # interpolation between calibration anchor points, then rounds to the
-    # nearest 0.1. This is what the judges asked for: "make deductions
-    # really precise with 0.1 deductions instead of 0.2, 0.5, 1 point
-    # deductions." The anchor points themselves are unchanged from the
-    # original calibration, so scores you've already validated shouldn't
-    # move much — values BETWEEN anchors just get a finer, smoother ramp
-    # instead of a hard step.
 
     def _graduated_deduction(self, value, breakpoints, cap=1.0, unknown_default=0.5):
         """breakpoints: ascending list of (value, deduction) anchor pairs."""
@@ -307,17 +318,12 @@ class BarracudaScorer:
         d = round(min(cap, max(0.0, d)) / 0.1) * 0.1
         return round(d, 2)
 
-    # Anchor points, unchanged from the original calibration:
     _VERTICAL_ALIGNMENT_BREAKPOINTS = [
         (0, 0.0), (3, 0.0), (5, 0.2), (7, 0.4), (9, 0.6), (12, 0.8), (20, 1.0)
     ]
     _BACKPIKE_BREAKPOINTS = [
         (0, 0.0), (5, 0.2), (10, 0.3), (20, 0.5), (30, 0.8), (45, 1.0)
     ]
-
-    # NEW — leg / ankle / underwater-knee tiers, per the judges' "1-5 small,
-    # 5-14 medium, 15+ large" guidance. Point VALUES (0.1/0.3/0.5) are this
-    # file's placeholder — confirm with judges.
     _BEND_DEVIATION_BREAKPOINTS = [
         (0, 0.0), (1, 0.1), (5, 0.3), (15, 0.5),
     ]
@@ -335,25 +341,15 @@ class BarracudaScorer:
             deviation_degrees, self._BEND_DEVIATION_BREAKPOINTS, unknown_default=0.3
         )
 
-    # NEW — back roundness. Only the 30° cutoff is judge-confirmed; the
-    # magnitude below it is this file's PLACEHOLDER guess.
     _BACK_ROUNDNESS_BREAKPOINTS = [
         (0, 0.6), (10, 0.4), (20, 0.2), (30, 0.0),
     ]
 
     def _abs_back_roundness(self, back_angle_degrees):
-        """back_angle_degrees: shoulder-hip-knee angle at back layout,
-        180 = perfectly straight, lower = more rounded/folded. Higher
-        angle = straighter = better, so breakpoints ascend in x with
-        descending deduction (built that way above)."""
         if back_angle_degrees is None:
             return 0.3
         return self._graduated_deduction(back_angle_degrees, self._BACK_ROUNDNESS_BREAKPOINTS, unknown_default=0.3)
 
-    # NEW — travel and unroll speed. NO numeric thresholds were given in
-    # the meeting notes at all. These are rough PLACEHOLDER scales so the
-    # measurement pipeline exists end-to-end; treat every number here as
-    # a guess to be replaced once the judges give real thresholds.
     _TRAVEL_BREAKPOINTS = [
         (0.00, 0.0), (0.05, 0.2), (0.10, 0.5), (0.15, 1.0),
     ]
@@ -365,9 +361,6 @@ class BarracudaScorer:
         return self._graduated_deduction(hip_x_range, self._TRAVEL_BREAKPOINTS, unknown_default=0.0)
 
     def _abs_unroll_speed(self, descent_to_ascent_speed_ratio):
-        """Ratio should be < 1 (descent slower than the initial rise, per
-        the judges: 'going down needs to be slower than the beginning').
-        Ratio >= 1 means descent was as fast or faster than ascent."""
         return self._graduated_deduction(
             descent_to_ascent_speed_ratio, self._UNROLL_SPEED_RATIO_BREAKPOINTS, unknown_default=0.0
         )
@@ -379,11 +372,10 @@ class BarracudaScorer:
 
     def _abs_back_layout_depth(self, _placeholder=None):
         """STUB — 'how far under should the swimmer be, and how much
-        deduction' were both left blank in the meeting notes. Always
-        returns 0 until this is calibrated."""
+        deduction' were both left blank in the meeting notes."""
         return 0.0
 
-    # ── Relative deduction (unchanged) ──
+    # ── Relative deduction ──
 
     def _relative_deduction(self, value, all_values, max_deduction, higher_is_worse=True):
         valid = [v for v in all_values if v is not None]
@@ -405,8 +397,6 @@ class BarracudaScorer:
     # ── Measurements ──
 
     def _angle_series(self, df, p1_name, p2_name, p3_name, frame_range):
-        """Median joint angle p1-p2-p3 over a frame range, using left/right
-        averaged x/y. Returns None if no valid frames."""
         angles = []
         for fn in frame_range:
             if fn < 0 or fn >= len(df):
@@ -434,7 +424,6 @@ class BarracudaScorer:
             m['fps'] = 30.0
 
         ab_ankles = self._collect(ab, 'ankle')
-        m['foot_clearance'] = (wl_ab - min(ab_ankles)) if ab_ankles else 0
 
         peak_frame = None
         if ab_ankles:
@@ -444,34 +433,34 @@ class BarracudaScorer:
                 if a is not None and a == min_ankle:
                     peak_frame = i; break
 
-        # NEW — camera-distance-independent version of foot clearance.
-        # `foot_clearance` above is a fraction of FRAME height, which
-        # changes with camera zoom/distance even for the same real jump.
-        # This measures the swimmer's own shoulder-to-ankle length in the
-        # same frames (near peak, when they should be roughly extended)
-        # and expresses clearance as a multiple of THAT instead — since
-        # both numbers come from the same frame, zoom/distance affects
-        # them proportionally and mostly cancels out.
-        # NOT used for base_score yet (see CALIBRATION LOG at top) — this
-        # is exposed for comparison across your varied-camera videos
-        # before we recalibrate the height breakpoint chart around it.
-        body_scale = None
-        if peak_frame is not None:
-            scale_window = range(max(0, peak_frame - 5), min(len(ab), peak_frame + 6))
-            lengths = []
-            for fn in scale_window:
-                row = ab.iloc[fn]
-                sx, sy = self._avg_lr_x(row, 'shoulder'), self._avg_lr(row, 'shoulder')
-                ax, ay = self._avg_lr_x(row, 'ankle'), self._avg_lr(row, 'ankle')
-                if all(v is not None for v in [sx, sy, ax, ay]):
-                    lengths.append(np.sqrt((ax - sx) ** 2 + (ay - sy) ** 2))
-            body_scale = np.median(lengths) if lengths else None
-        m['body_scale'] = body_scale
-        m['foot_clearance_normalized'] = (
-            m['foot_clearance'] / body_scale if body_scale and body_scale > 1e-6 else None
-        )
+        # foot_clearance: median of the PEAK_AVERAGE_WINDOW highest-ankle
+        # frames in a small window around peak_frame, instead of trusting
+        # peak_frame's single value alone. Guards against a tracking
+        # glitch on exactly the peak frame skewing the base score. Median
+        # (not mean) so one remaining outlier even within this small
+        # window still can't dominate. peak_frame ITSELF is unchanged —
+        # ascent/descent/backpike windows below still center on it.
+        if ab_ankles:
+            if peak_frame is not None:
+                half = self.PEAK_AVERAGE_WINDOW // 2
+                window_vals = []
+                for fn in range(max(0, peak_frame - half - 1), min(len(ab), peak_frame + half + 2)):
+                    a = self._avg_lr(ab.iloc[fn], 'ankle')
+                    if a is not None:
+                        window_vals.append(a)
+                if window_vals:
+                    window_vals.sort()  # ascending y = highest point first
+                    top_n = window_vals[:self.PEAK_AVERAGE_WINDOW]
+                    peak_ankle_y = float(np.median(top_n))
+                else:
+                    peak_ankle_y = min_ankle
+            else:
+                peak_ankle_y = min_ankle
+            m['foot_clearance'] = wl_ab - peak_ankle_y
+        else:
+            m['foot_clearance'] = 0
 
-        # Ascent tilt + knee angle (existing)
+        # Ascent tilt + knee angle
         ascent_tilts = []
         knee_angles = []
         ascent_window = range(max(0, (peak_frame or 0) - 7), min(len(ab), (peak_frame or 0) + 8)) \
@@ -492,7 +481,7 @@ class BarracudaScorer:
 
         m['ascent_tilt_median'] = np.median(ascent_tilts) if ascent_tilts else None
 
-        # Descent tilt (existing)
+        # Descent tilt
         descent_tilts = []
         descent_window = range(peak_frame, min(len(ab), peak_frame + 40)) if peak_frame is not None else range(0)
         if peak_frame is not None:
@@ -524,9 +513,7 @@ class BarracudaScorer:
             abs(180.0 - m['knee_angle_median']) if m['knee_angle_median'] is not None else None
         )
 
-        # NEW — ankle extension (above water), same window as knee.
-        # Uses whichever foot point exists: heel > foot_index > foot_best,
-        # in that preference order, since not every tracker run has all three.
+        # Ankle extension (above water), same window as knee
         ankle_angle = None
         for foot_pt in ('heel', 'foot_index', 'foot_best'):
             col_check = f'left_{foot_pt}_y'
@@ -539,22 +526,15 @@ class BarracudaScorer:
             abs(180.0 - ankle_angle) if ankle_angle is not None else None
         )
 
-        # NEW — back roundness. Approximated using the FIRST ~10 frames of
-        # the clip as a stand-in for the "back layout" starting position.
-        # TODO: confirm this is the right window with the judges/coach —
-        # if the back layout happens somewhere else in your clips, adjust
-        # `layout_window` below.
+        # Back roundness — first ~10 frames as a stand-in for "back layout"
         layout_window = range(0, min(10, len(ab)))
         m['back_angle_median'] = self._angle_series(ab, 'shoulder', 'hip', 'knee', layout_window)
 
-        # NEW — travel: how far the hips drift horizontally over the whole
-        # above-water clip, in normalized frame-width units (0-1).
+        # Travel: hip x-range over the whole above-water clip
         hip_xs = [v for v in (self._avg_lr_x(ab.iloc[i], 'hip') for i in range(len(ab))) if v is not None]
         m['hip_travel_range'] = (max(hip_xs) - min(hip_xs)) if hip_xs else None
 
-        # NEW — unroll speed ratio: average |vertical speed| during descent
-        # vs during the initial ascent/rise. Judges want descent SLOWER
-        # than the beginning, i.e. this ratio should be < 1.
+        # Unroll speed ratio: descent vertical speed vs ascent vertical speed
         def _avg_vertical_speed(frame_range):
             ys = []
             for fn in frame_range:
@@ -574,7 +554,27 @@ class BarracudaScorer:
         else:
             m['unroll_speed_ratio'] = None
 
-        # Backpike (existing)
+        # NEW (from last round) — camera-distance-independent version of
+        # foot clearance: swimmer's own shoulder-to-ankle length near the
+        # peak, used to express clearance in body-lengths instead of
+        # frame-height fraction. NOT used for base_score yet.
+        body_scale = None
+        if peak_frame is not None:
+            scale_window = range(max(0, peak_frame - 5), min(len(ab), peak_frame + 6))
+            lengths = []
+            for fn in scale_window:
+                row = ab.iloc[fn]
+                sx, sy = self._avg_lr_x(row, 'shoulder'), self._avg_lr(row, 'shoulder')
+                ax, ay = self._avg_lr_x(row, 'ankle'), self._avg_lr(row, 'ankle')
+                if all(v is not None for v in [sx, sy, ax, ay]):
+                    lengths.append(np.sqrt((ax - sx) ** 2 + (ay - sy) ** 2))
+            body_scale = np.median(lengths) if lengths else None
+        m['body_scale'] = body_scale
+        m['foot_clearance_normalized'] = (
+            m['foot_clearance'] / body_scale if body_scale and body_scale > 1e-6 else None
+        )
+
+        # Backpike
         if peak_frame is not None:
             bp_angles = []
             for fn in descent_window:
@@ -601,7 +601,7 @@ class BarracudaScorer:
             m['backpike_sustained'] = 0
             m['backpike_score'] = 0
 
-        # Underwater metrics (existing informational + NEW underwater knee)
+        # Underwater metrics
         if uw is not None:
             uw_hips = [(i, self._avg_lr(uw.iloc[i], 'hip')) for i in range(len(uw))]
             uw_hips = [(i, h) for i, h in uw_hips if h is not None]
@@ -625,9 +625,6 @@ class BarracudaScorer:
                 hold_hips = [h for i, h in uw_hips if hold_start <= i < hold_end]
                 m['hold_stability_std'] = np.std(hold_hips) if hold_hips else 0.15
 
-                # NEW — underwater bent knee, windowed around the
-                # underwater peak (deepest hip point), mirroring the
-                # above-water knee-angle logic.
                 uw_window = range(max(0, peak_i - 7), min(len(uw), peak_i + 8))
                 uw_knee_angle = self._angle_series(uw, 'hip', 'knee', 'ankle', uw_window)
                 m['underwater_knee_angle_median'] = uw_knee_angle
@@ -635,11 +632,6 @@ class BarracudaScorer:
                     abs(180.0 - uw_knee_angle) if uw_knee_angle is not None else None
                 )
 
-                # NEW — back layout depth (STUB measurement placeholder).
-                # We *can* measure how deep the hips are at the very start
-                # of the underwater clip (proxy for "how far under" at back
-                # layout), but there's no judge-given threshold yet, so
-                # this is exposed as a raw number only — no deduction.
                 start_window = range(0, min(10, len(uw)))
                 start_hip_depths = [
                     self._avg_lr(uw.iloc[i], 'hip') for i in start_window
@@ -669,16 +661,10 @@ class BarracudaScorer:
         return keys
 
     def _coaching_deduction_keys(self):
-        """Underwater-only categories judges normally can't see. Measured
-        and reported as coaching feedback; NOT counted toward the official
-        score unless INCLUDE_COACHING_IN_SCORE is set to True."""
+        """Underwater-only categories judges normally can't see."""
         return ['underwater_bent_knee', 'back_layout_depth']
 
     def _compute_all_deductions(self, m, group_values=None):
-        """Compute every deduction category (official + coaching) for one
-        figure's measurements `m`. `group_values` is an optional dict of
-        lists (for the relative/group component in score_all); pass None
-        for single-figure scoring (score_figure / score_single_pair)."""
         d = {}
         gv = group_values or {}
 
@@ -707,22 +693,20 @@ class BarracudaScorer:
         blended('ankle_extension', m.get('ankle_extension_deviation'), 'ankle_ext',
                  self._abs_bend_deviation, higher_is_worse=True)
         blended('back_roundness', m.get('back_angle_median'), 'back_angle',
-                 self._abs_back_roundness, higher_is_worse=False)  # higher angle = straighter = better
+                 self._abs_back_roundness, higher_is_worse=False)
         blended('travel', m.get('hip_travel_range'), 'travel',
                  self._abs_travel, higher_is_worse=True)
         blended('unroll_speed', m.get('unroll_speed_ratio'), 'unroll',
                  self._abs_unroll_speed, higher_is_worse=True)
         blended('head_tuck', None, 'head_tuck',
-                 self._abs_head_tuck, higher_is_worse=True)  # STUB, always 0
+                 self._abs_head_tuck, higher_is_worse=True)
 
-        # Coaching-only (no relative/group component — these aren't meant
-        # to be competitive rankings, just feedback numbers)
         hd = self._abs_bend_deviation(m.get('underwater_knee_deviation'))
         d['underwater_bent_knee'] = round(hd, 2)
         d['underwater_bent_knee_degrees'] = (
             round(m['underwater_knee_deviation'], 1) if m.get('underwater_knee_deviation') is not None else None
         )
-        d['back_layout_depth'] = round(self._abs_back_layout_depth(), 2)  # STUB, always 0
+        d['back_layout_depth'] = round(self._abs_back_layout_depth(), 2)
         d['back_layout_depth_value'] = m.get('back_layout_depth_start')
 
         return d
@@ -767,8 +751,7 @@ class BarracudaScorer:
         return self.results
 
     def score_figure(self, name):
-        """Score a single figure (no relative/group component). For full
-        scoring with relative ranking against a batch, use score_all()."""
+        """Score a single figure (no relative/group component)."""
         m = self._extract_measurements(name)
         d = self._compute_all_deductions(m, group_values=None)
 
@@ -785,11 +768,9 @@ class BarracudaScorer:
 
     @classmethod
     def score_single_pair(cls, above_csv_path, below_csv_path=None, name="figure"):
-        """
-        Score one figure directly from its above/below CSV paths, with no
-        folder scanning. This is what the web app calls right after
-        tracking finishes.
-        """
+        """Score one figure directly from its above/below CSV paths, with
+        no folder scanning — what the web app calls right after tracking
+        finishes."""
         scorer = cls.__new__(cls)
         scorer.data_dir = None
         scorer.figures = {
