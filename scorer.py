@@ -341,14 +341,23 @@ class BarracudaScorer:
             deviation_degrees, self._BEND_DEVIATION_BREAKPOINTS, unknown_default=0.3
         )
 
+    # FIX: previously took the raw joint angle (180° = straight) directly,
+    # with breakpoints covering only 0-30°. A real swimmer's back angle is
+    # almost always 100-180° in a back layout, which is entirely outside
+    # that 0-30° domain — so every real figure silently clamped to 0
+    # deduction regardless of actual roundness. Now uses DEVIATION from
+    # straight (180 - angle) instead, matching how leg/ankle extension
+    # already work, so the breakpoint domain overlaps with realistic
+    # values. The judges' one confirmed number — "less than 30 degrees
+    # back will be rounded" — is read here as "30°+ of deviation from
+    # straight counts as rounded." Point values beyond that are still this
+    # file's placeholder guess (see calibration log at the top).
     _BACK_ROUNDNESS_BREAKPOINTS = [
-        (0, 0.6), (10, 0.4), (20, 0.2), (30, 0.0),
+        (0, 0.0), (15, 0.2), (30, 0.4), (50, 0.6),
     ]
 
-    def _abs_back_roundness(self, back_angle_degrees):
-        if back_angle_degrees is None:
-            return 0.3
-        return self._graduated_deduction(back_angle_degrees, self._BACK_ROUNDNESS_BREAKPOINTS, unknown_default=0.3)
+    def _abs_back_roundness(self, deviation_degrees):
+        return self._graduated_deduction(deviation_degrees, self._BACK_ROUNDNESS_BREAKPOINTS, unknown_default=0.3)
 
     _TRAVEL_BREAKPOINTS = [
         (0.00, 0.0), (0.05, 0.2), (0.10, 0.5), (0.15, 1.0),
@@ -529,6 +538,9 @@ class BarracudaScorer:
         # Back roundness — first ~10 frames as a stand-in for "back layout"
         layout_window = range(0, min(10, len(ab)))
         m['back_angle_median'] = self._angle_series(ab, 'shoulder', 'hip', 'knee', layout_window)
+        m['back_roundness_deviation'] = (
+            abs(180.0 - m['back_angle_median']) if m['back_angle_median'] is not None else None
+        )
 
         # Travel: hip x-range over the whole above-water clip
         hip_xs = [v for v in (self._avg_lr_x(ab.iloc[i], 'hip') for i in range(len(ab))) if v is not None]
@@ -692,8 +704,8 @@ class BarracudaScorer:
                  self._abs_bend_deviation, higher_is_worse=True)
         blended('ankle_extension', m.get('ankle_extension_deviation'), 'ankle_ext',
                  self._abs_bend_deviation, higher_is_worse=True)
-        blended('back_roundness', m.get('back_angle_median'), 'back_angle',
-                 self._abs_back_roundness, higher_is_worse=False)
+        blended('back_roundness', m.get('back_roundness_deviation'), 'back_roundness',
+                 self._abs_back_roundness, higher_is_worse=True)
         blended('travel', m.get('hip_travel_range'), 'travel',
                  self._abs_travel, higher_is_worse=True)
         blended('unroll_speed', m.get('unroll_speed_ratio'), 'unroll',
@@ -728,7 +740,7 @@ class BarracudaScorer:
             'backpike': [measurements[n].get('backpike_score', 0) for n in measurements],
             'leg_ext': [measurements[n].get('leg_extension_deviation') for n in measurements],
             'ankle_ext': [measurements[n].get('ankle_extension_deviation') for n in measurements],
-            'back_angle': [measurements[n].get('back_angle_median') for n in measurements],
+            'back_roundness': [measurements[n].get('back_roundness_deviation') for n in measurements],
             'travel': [measurements[n].get('hip_travel_range') for n in measurements],
             'unroll': [measurements[n].get('unroll_speed_ratio') for n in measurements],
             'head_tuck': [None for _ in measurements],
