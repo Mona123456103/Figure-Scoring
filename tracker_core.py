@@ -649,18 +649,19 @@ class AboveWaterRTMPoseTracker:
                         fresh_idx = select_best_swimmer_coco(keypoints, scores, water_level, frame_masked, self.ignore_top_percent)
                         if fresh_idx is not None and fresh_idx != best_person_idx:
                             fresh_pos = self._get_swimmer_position(keypoints[fresh_idx], scores[fresh_idx], h, w)
-                            drift = np.sqrt((fresh_pos['x'] - self.locked_swimmer['x'])**2 + (fresh_pos['y'] - self.locked_swimmer['y'])**2)
-                            if drift > self.relock_drift_threshold:
-                                if self._pending_relock_idx == fresh_idx:
-                                    self._pending_relock_streak += 1
+                            if fresh_pos is not None:
+                                drift = np.sqrt((fresh_pos['x'] - self.locked_swimmer['x'])**2 + (fresh_pos['y'] - self.locked_swimmer['y'])**2)
+                                if drift > self.relock_drift_threshold:
+                                    if self._pending_relock_idx == fresh_idx:
+                                        self._pending_relock_streak += 1
+                                    else:
+                                        self._pending_relock_idx, self._pending_relock_streak = fresh_idx, 1
+                                    if self._pending_relock_streak >= 2:
+                                        best_person_idx = fresh_idx
+                                        self.locked_swimmer = fresh_pos
+                                        self._pending_relock_idx, self._pending_relock_streak = None, 0
                                 else:
-                                    self._pending_relock_idx, self._pending_relock_streak = fresh_idx, 1
-                                if self._pending_relock_streak >= 2:
-                                    best_person_idx = fresh_idx
-                                    self.locked_swimmer = fresh_pos
                                     self._pending_relock_idx, self._pending_relock_streak = None, 0
-                            else:
-                                self._pending_relock_idx, self._pending_relock_streak = None, 0
                 else:
                     self.frames_since_detection += 1
                     if self.frames_since_detection > self.max_frames_lost:
@@ -926,17 +927,18 @@ class RTMPoseUnderwaterTracker:
                         if fresh_idx is not None and fresh_idx != best_idx:
                             fresh_pos = get_hip_position(keypoints[fresh_idx], scores[fresh_idx], h, w)
                             cur_pos = get_hip_position(keypoints[best_idx], scores[best_idx], h, w)
-                            drift = np.sqrt((fresh_pos['x'] - cur_pos['x'])**2 + (fresh_pos['y'] - cur_pos['y'])**2)
-                            if drift > self.relock_drift_threshold:
-                                if self._pending_relock_idx == fresh_idx:
-                                    self._pending_relock_streak += 1
+                            if fresh_pos is not None and cur_pos is not None:
+                                drift = np.sqrt((fresh_pos['x'] - cur_pos['x'])**2 + (fresh_pos['y'] - cur_pos['y'])**2)
+                                if drift > self.relock_drift_threshold:
+                                    if self._pending_relock_idx == fresh_idx:
+                                        self._pending_relock_streak += 1
+                                    else:
+                                        self._pending_relock_idx, self._pending_relock_streak = fresh_idx, 1
+                                    if self._pending_relock_streak >= 2:
+                                        best_idx = fresh_idx
+                                        self._pending_relock_idx, self._pending_relock_streak = None, 0
                                 else:
-                                    self._pending_relock_idx, self._pending_relock_streak = fresh_idx, 1
-                                if self._pending_relock_streak >= 2:
-                                    best_idx = fresh_idx
                                     self._pending_relock_idx, self._pending_relock_streak = None, 0
-                            else:
-                                self._pending_relock_idx, self._pending_relock_streak = None, 0
                 else:
                     self.frames_since_detection += 1
                     if self.frames_since_detection > self.max_frames_lost:
