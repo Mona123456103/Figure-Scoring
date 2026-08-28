@@ -37,7 +37,7 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    .block-container { padding-top: 1.6rem; padding-bottom: 3rem; max-width: 900px; }
+    .block-container { padding-top: 4rem; padding-bottom: 3rem; max-width: 900px; }
     h1, h2, h3 { letter-spacing: -0.01em; }
 
     /* Top bar */
@@ -45,7 +45,14 @@ st.markdown(
         display: flex; align-items: center; justify-content: space-between;
         padding-bottom: 10px; margin-bottom: 8px; border-bottom: 1px solid rgba(120,120,120,0.18);
     }
-    .sa-logo { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.02em; color: #0e7490; }
+    .sa-logo {
+        font-size: 2.4rem; font-weight: 800; letter-spacing: -0.03em; color: #0e7490;
+        line-height: 1.3; padding: 6px 0 10px 0; margin: 0;
+    }
+
+    /* Nudge the nav buttons down so they line up with the bigger logo
+       instead of sitting above its vertical center */
+    div[data-testid="column"]:has(.sa-logo) { padding-top: 4px; }
 
     /* Hero */
     .sa-hero {
