@@ -37,7 +37,13 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    .block-container { padding-top: 4rem; padding-bottom: 3rem; max-width: 900px; }
+    /* Fill the sides instead of leaving them stark white on wide screens */
+    .stApp {
+        background: radial-gradient(circle at 12% 8%, rgba(8,145,178,0.05), transparent 45%),
+                    radial-gradient(circle at 88% 92%, rgba(14,116,144,0.05), transparent 45%),
+                    #fbfdfe;
+    }
+    .block-container { padding-top: 4rem; padding-bottom: 3rem; max-width: 1040px; }
     h1, h2, h3 { letter-spacing: -0.01em; }
 
     /* Top bar */
@@ -85,6 +91,10 @@ st.markdown(
     }
     .sa-card h4 { margin: 0 0 6px 0; font-size: 1.02rem; }
     .sa-card p { margin: 0; font-size: 0.92rem; color: #475569; line-height: 1.5; }
+
+    /* Filming-tip images */
+    .sa-fig-caption { font-size: 0.85rem; color: #64748b; text-align: center; margin-top: 6px; }
+    div[data-testid="stImage"] img { border-radius: 12px; border: 1px solid rgba(120,120,120,0.15); }
 
     /* Segmented control */
     div[role="radiogroup"] {
@@ -211,6 +221,30 @@ def render_home():
             st.markdown(f"**{i}**")
         with c2:
             st.markdown(f"**{title}**  \n{body}")
+
+    st.markdown('<div class="sa-section-label">Camera setup that actually works</div>', unsafe_allow_html=True)
+    st.write(
+        "Tracking accuracy starts before the video is even uploaded. The "
+        "single biggest factor is camera angle: shoot from eye level, not "
+        "from above looking down. A downward angle foreshortens the "
+        "swimmer's rise out of the water, which throws off exactly the "
+        "height measurement the base score depends on — a horizontal, "
+        "eye-level camera keeps that rise measurable and consistent."
+    )
+    img_col1, img_col2 = st.columns(2)
+    with img_col1:
+        st.image("assets/camera_angle_guide.png", use_container_width=True)
+        st.markdown(
+            '<div class="sa-fig-caption">Shoot level with the water, not down at it.</div>',
+            unsafe_allow_html=True,
+        )
+    with img_col2:
+        st.image("assets/framing_example.png", use_container_width=True)
+        st.markdown(
+            '<div class="sa-fig-caption">Keep the swimmer centered with clear space above '
+            'and below for the full rise and entry.</div>',
+            unsafe_allow_html=True,
+        )
 
     st.markdown('<div class="sa-section-label">Built for how you actually film</div>', unsafe_allow_html=True)
     fcol1, fcol2, fcol3 = st.columns(3)
