@@ -27,6 +27,7 @@ import session_store
 import issue_reports
 
 APP_NAME = "Sync.AI"
+APP_DIR = Path(__file__).resolve().parent
 
 st.set_page_config(
     page_title=APP_NAME,
@@ -54,7 +55,9 @@ st.markdown(
     .sa-logo {
         font-size: 2.4rem; font-weight: 800; letter-spacing: -0.03em; color: #0e7490;
         line-height: 1.3; padding: 6px 0 10px 0; margin: 0;
+        display: inline-block; text-decoration: none; cursor: pointer;
     }
+    .sa-logo:hover { color: #0891b2; text-decoration: none; }
 
     /* Nudge the nav buttons down so they line up with the bigger logo
        instead of sitting above its vertical center */
@@ -131,18 +134,30 @@ st.markdown(
 )
 
 # ── Page routing ────────────────────────────────────────────────────────
+# Uses the URL's ?page= query param as the source of truth, so a plain
+# HTML link (like the logo below) can navigate with a normal click/reload
+# instead of needing a Python callback wired to it.
+_valid_pages = {"home", "analyze", "history", "help"}
+_qp_page = st.query_params.get("page")
+
 if "page" not in st.session_state:
-    st.session_state.page = "home"
+    st.session_state.page = _qp_page if _qp_page in _valid_pages else "home"
+elif _qp_page in _valid_pages and _qp_page != st.session_state.page:
+    st.session_state.page = _qp_page
 
 
 def go_to(page_name):
     st.session_state.page = page_name
+    st.query_params["page"] = page_name
 
 
 # ── Top bar (present on every page) ────────────────────────────────────
 top_left, top_a, top_b, top_c = st.columns([5, 1.4, 1.4, 1.2])
 with top_left:
-    st.markdown(f'<div class="sa-logo">{APP_NAME}</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<a href="?page=home" target="_self" class="sa-logo">{APP_NAME}</a>',
+        unsafe_allow_html=True,
+    )
 with top_a:
     if st.button("Analyze", use_container_width=True, type="primary" if st.session_state.page == "analyze" else "secondary"):
         go_to("analyze")
@@ -232,19 +247,24 @@ def render_home():
         "eye-level camera keeps that rise measurable and consistent."
     )
     img_col1, img_col2 = st.columns(2)
-    with img_col1:
-        st.image("assets/camera_angle_guide.png", use_container_width=True)
-        st.markdown(
-            '<div class="sa-fig-caption">Shoot level with the water, not down at it.</div>',
-            unsafe_allow_html=True,
-        )
-    with img_col2:
-        st.image("assets/framing_example.png", use_container_width=True)
-        st.markdown(
-            '<div class="sa-fig-caption">Keep the swimmer centered with clear space above '
-            'and below for the full rise and entry.</div>',
-            unsafe_allow_html=True,
-        )
+
+    def _show_figure(col, filename, caption):
+        path = APP_DIR / filename
+        with col:
+            if path.exists():
+                st.image(str(path), use_container_width=True)
+                st.markdown(f'<div class="sa-fig-caption">{caption}</div>', unsafe_allow_html=True)
+            else:
+                st.warning(
+                    f"Image not found: {filename}. It needs to sit in the same "
+                    f"folder as app.py in the repo (looked in: {APP_DIR})."
+                )
+
+    _show_figure(img_col1, "camera_angle_guide.png", "Shoot level with the water, not down at it.")
+    _show_figure(
+        img_col2, "framing_example.png",
+        "Keep the swimmer centered with clear space above and below for the full rise and entry.",
+    )
 
     st.markdown('<div class="sa-section-label">Built for how you actually film</div>', unsafe_allow_html=True)
     fcol1, fcol2, fcol3 = st.columns(3)
