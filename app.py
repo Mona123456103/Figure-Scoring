@@ -23,7 +23,6 @@ import session_store
 
 st.set_page_config(
     page_title="Barracuda Tracker",
-    page_icon="🏊",
     layout="centered",
 )
 
