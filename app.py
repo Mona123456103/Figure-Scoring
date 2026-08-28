@@ -170,6 +170,39 @@ with top_c:
 st.markdown('<div class="sa-topbar"></div>', unsafe_allow_html=True)
 
 
+# ── Shared: filming-guide images + popup, used from both Home and Analyze ──
+def _show_figure(col, filename, caption):
+    path = APP_DIR / filename
+    with col:
+        if path.exists():
+            st.image(str(path), use_container_width=True)
+            st.markdown(f'<div class="sa-fig-caption">{caption}</div>', unsafe_allow_html=True)
+        else:
+            st.warning(
+                f"Image not found: {filename}. It needs to sit in the same "
+                f"folder as app.py in the repo (looked in: {APP_DIR})."
+            )
+
+
+@st.dialog("How should I film this?")
+def show_filming_guide_dialog():
+    st.write(
+        "Camera angle is the single biggest factor in tracking accuracy. "
+        "Shoot from eye level with the water, not from above looking "
+        "down — a downward angle foreshortens the swimmer's rise out of "
+        "the water, which throws off the height measurement the base "
+        "score depends on."
+    )
+    dcol1, dcol2 = st.columns(2)
+    _show_figure(dcol1, "camera_angle_guide.png", "Shoot level with the water, not down at it.")
+    _show_figure(
+        dcol2, "framing_example.png",
+        "Keep the swimmer centered with clear space above and below for the full rise and entry.",
+    )
+    if st.button("Got it", type="primary"):
+        st.rerun()
+
+
 # ============================================================================
 # HOME PAGE
 # ============================================================================
@@ -238,6 +271,8 @@ def render_home():
             st.markdown(f"**{title}**  \n{body}")
 
     st.markdown('<div class="sa-section-label">Camera setup that actually works</div>', unsafe_allow_html=True)
+    if st.button("How should I film this?", type="primary"):
+        show_filming_guide_dialog()
     st.write(
         "Tracking accuracy starts before the video is even uploaded. The "
         "single biggest factor is camera angle: shoot from eye level, not "
@@ -247,19 +282,6 @@ def render_home():
         "eye-level camera keeps that rise measurable and consistent."
     )
     img_col1, img_col2 = st.columns(2)
-
-    def _show_figure(col, filename, caption):
-        path = APP_DIR / filename
-        with col:
-            if path.exists():
-                st.image(str(path), use_container_width=True)
-                st.markdown(f'<div class="sa-fig-caption">{caption}</div>', unsafe_allow_html=True)
-            else:
-                st.warning(
-                    f"Image not found: {filename}. It needs to sit in the same "
-                    f"folder as app.py in the repo (looked in: {APP_DIR})."
-                )
-
     _show_figure(img_col1, "camera_angle_guide.png", "Shoot level with the water, not down at it.")
     _show_figure(
         img_col2, "framing_example.png",
@@ -318,11 +340,16 @@ def render_home():
 # ============================================================================
 def render_analyze():
     st.markdown('<div class="sa-section-label">Analyze</div>', unsafe_allow_html=True)
-    st.write(
-        "Upload footage below. Each of the three modes uses its own "
-        "tracking model and its own height calibration — see the Home "
-        "page for why."
-    )
+    top_row1, top_row2 = st.columns([4, 2])
+    with top_row1:
+        st.write(
+            "Upload footage below. Each of the three modes uses its own "
+            "tracking model and its own height calibration — see the Home "
+            "page for why."
+        )
+    with top_row2:
+        if st.button("How should I film this?", use_container_width=True):
+            show_filming_guide_dialog()
 
     chosen = dict(mode="performance", det_frequency=1)
     waterline_value = None
