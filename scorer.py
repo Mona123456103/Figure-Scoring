@@ -278,23 +278,68 @@ class BarracudaScorer:
 
     # ── Height chart → base score ──
 
-    def _height_base_score(self, foot_clearance):
-        breakpoints = [
-            (0.33, 10.0), (0.30, 9.5), (0.27, 9.0), (0.24, 8.5),
-            (0.21, 8.0), (0.18, 7.5), (0.15, 7.0), (0.12, 6.5),
-            (0.09, 6.0), (0.06, 5.0), (0.03, 4.0), (0.00, 3.0),
-        ]
-        if foot_clearance >= breakpoints[0][0]:
+    # Height chart, in frame-fraction units — used for Above and
+    # Above+Below modes, where the above-water camera has a full,
+    # dedicated view of the swimmer.
+    _HEIGHT_BASE_BREAKPOINTS_FRAME_FRACTION = [
+        (0.33, 10.0), (0.30, 9.5), (0.27, 9.0), (0.24, 8.5),
+        (0.21, 8.0), (0.18, 7.5), (0.15, 7.0), (0.12, 6.5),
+        (0.09, 6.0), (0.06, 5.0), (0.03, 4.0), (0.00, 3.0),
+    ]
+
+    # WALTICAM-SPECIFIC height chart, in body-length units.
+    #
+    # A WaltiCam splits ONE camera's frame into top (above-water) and
+    # bottom (underwater) halves — so the above-water half has roughly
+    # HALF the vertical field of view of a dedicated above-water camera
+    # pointed at the same swimmer. The same real jump therefore occupies
+    # a LARGER fraction of a WaltiCam half-frame than of a full dedicated
+    # above-water frame. Using the frame-fraction chart directly on
+    # WaltiCam data would systematically overestimate the base score.
+    #
+    # foot_clearance_normalized (body-lengths, not frame-fraction)
+    # sidesteps this: both the swimmer's body and their clearance are
+    # measured in the SAME frame, so field-of-view differences cancel
+    # out. This is why Walticam mode uses a different metric AND a
+    # different chart from Above / Above+Below.
+    #
+    # PLACEHOLDER CALIBRATION: this chart is derived by converting the
+    # frame-fraction chart through an ASSUMED typical body_scale of 0.35
+    # (shoulder-to-ankle length as a fraction of frame height, from the
+    # original above-water calibration videos) — NOT real Walticam-
+    # specific calibration data. Confirm/recalibrate once you have
+    # Walticam videos with known judge scores to check against.
+    _ASSUMED_TYPICAL_BODY_SCALE_FOR_CONVERSION = 0.35
+    _HEIGHT_BASE_BREAKPOINTS_BODY_LENGTHS = [
+        (round(x / 0.35, 4), s)
+        for x, s in _HEIGHT_BASE_BREAKPOINTS_FRAME_FRACTION
+    ]
+
+    def _height_base_score(self, clearance_value, breakpoints):
+        if clearance_value >= breakpoints[0][0]:
             return breakpoints[0][1]
-        if foot_clearance <= breakpoints[-1][0]:
+        if clearance_value <= breakpoints[-1][0]:
             return breakpoints[-1][1]
         for i in range(len(breakpoints) - 1):
             cl_hi, sc_hi = breakpoints[i]
             cl_lo, sc_lo = breakpoints[i + 1]
-            if foot_clearance >= cl_lo:
-                t = (foot_clearance - cl_lo) / (cl_hi - cl_lo)
+            if clearance_value >= cl_lo:
+                t = (clearance_value - cl_lo) / (cl_hi - cl_lo)
                 return sc_lo + t * (sc_hi - sc_lo)
         return 3.0
+
+    def _compute_base_score(self, m, source_mode):
+        """Picks the right height metric + chart for the given source
+        mode. Returns (base_score, metric_name_used)."""
+        if source_mode == 'walticam' and m.get('foot_clearance_normalized') is not None:
+            base = self._height_base_score(
+                m['foot_clearance_normalized'], self._HEIGHT_BASE_BREAKPOINTS_BODY_LENGTHS
+            )
+            return round(base, 2), 'foot_clearance_normalized (body-lengths, walticam mode)'
+        base = self._height_base_score(
+            m.get('foot_clearance', 0), self._HEIGHT_BASE_BREAKPOINTS_FRAME_FRACTION
+        )
+        return round(base, 2), 'foot_clearance (frame-fraction)'
 
     # ── Graduated (0.1-increment) deduction scale ──
 
@@ -737,7 +782,7 @@ class BarracudaScorer:
 
     # ── Two-pass scoring: extract all, then compute blended deductions ──
 
-    def score_all(self):
+    def score_all(self, source_mode='above'):
         if not self.figures:
             print("  ⚠ No figures loaded — nothing to score.")
             print("    Check the data_dir path passed to BarracudaScorer() and")
@@ -762,8 +807,10 @@ class BarracudaScorer:
             m = measurements[name]
             d = self._compute_all_deductions(m, group_values=group_values)
 
-            base = self._height_base_score(m.get('foot_clearance', 0))
-            m['base_score'] = round(base, 2)
+            base, metric_used = self._compute_base_score(m, source_mode)
+            m['base_score'] = base
+            m['base_score_metric_used'] = metric_used
+            m['source_mode'] = source_mode
 
             total_ded = sum(d.get(k, 0) for k in self._deduction_keys())
             m['deductions'] = d
@@ -774,13 +821,20 @@ class BarracudaScorer:
 
         return self.results
 
-    def score_figure(self, name):
-        """Score a single figure (no relative/group component)."""
+    def score_figure(self, name, source_mode='above'):
+        """Score a single figure (no relative/group component).
+
+        source_mode: 'walticam', 'above', or 'above_below' — determines
+        which height metric/chart is used for the base score (see
+        _compute_base_score) and is recorded on the result for display.
+        """
         m = self._extract_measurements(name)
         d = self._compute_all_deductions(m, group_values=None)
 
-        base = self._height_base_score(m.get('foot_clearance', 0))
-        m['base_score'] = round(base, 2)
+        base, metric_used = self._compute_base_score(m, source_mode)
+        m['base_score'] = base
+        m['base_score_metric_used'] = metric_used
+        m['source_mode'] = source_mode
 
         total_ded = sum(d.get(k, 0) for k in self._deduction_keys())
         m['deductions'] = d
@@ -791,10 +845,16 @@ class BarracudaScorer:
         return m
 
     @classmethod
-    def score_single_pair(cls, above_csv_path, below_csv_path=None, name="figure"):
+    def score_single_pair(cls, above_csv_path, below_csv_path=None, name="figure", source_mode='above'):
         """Score one figure directly from its above/below CSV paths, with
         no folder scanning — what the web app calls right after tracking
-        finishes."""
+        finishes.
+
+        source_mode: 'walticam', 'above', or 'above_below'. Walticam uses
+        a body-length-normalized height metric instead of the raw frame-
+        fraction one, since a WaltiCam half-frame has a different field
+        of view than a dedicated above-water camera (see
+        _HEIGHT_BASE_BREAKPOINTS_BODY_LENGTHS above)."""
         scorer = cls.__new__(cls)
         scorer.data_dir = None
         scorer.figures = {
@@ -804,7 +864,7 @@ class BarracudaScorer:
             }
         }
         scorer.results = {}
-        return scorer.score_figure(name)
+        return scorer.score_figure(name, source_mode=source_mode)
 
     # ── Output ──
 
