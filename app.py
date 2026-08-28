@@ -19,6 +19,7 @@ Run locally:
 import streamlit as st
 import tempfile
 import time
+import pandas as pd
 from pathlib import Path
 
 import tracker_core as tc
@@ -28,6 +29,18 @@ import issue_reports
 
 APP_NAME = "Sync.AI"
 APP_DIR = Path(__file__).resolve().parent
+
+DEDUCTION_LABELS = {
+    "ascent_alignment": "Ascent alignment",
+    "descent_alignment": "Descent alignment",
+    "backpike": "Backpike",
+    "leg_extension": "Leg extension",
+    "ankle_extension": "Ankle extension",
+    "back_roundness": "Back roundness",
+    "travel": "Travel",
+    "unroll_speed": "Unroll speed",
+    "head_tuck": "Head tuck",
+}
 
 st.set_page_config(
     page_title=APP_NAME,
@@ -688,6 +701,73 @@ def render_analyze():
 # ============================================================================
 # HISTORY PAGE
 # ============================================================================
+def render_athlete_progress(sessions):
+    """Score-over-time chart plus a notepad of still-outstanding deductions
+    for a chosen athlete, built from stored session history."""
+    swimmer_ids = sorted({s.get("swimmer_id", "Unknown") for s in sessions})
+    if not swimmer_ids:
+        return
+
+    st.markdown('<div class="sa-section-label">Athlete progress</div>', unsafe_allow_html=True)
+    chosen_swimmer = st.selectbox("Athlete", options=swimmer_ids, key="athlete_progress_select")
+
+    athlete_sessions = [s for s in sessions if s.get("swimmer_id", "Unknown") == chosen_swimmer]
+    # session_store returns newest-first; sort ascending (oldest to newest)
+    # for a chronological trend line.
+    athlete_sessions = sorted(athlete_sessions, key=lambda s: s.get("timestamp", ""))
+
+    scored = [s for s in athlete_sessions if s.get("score") is not None]
+    if len(scored) >= 2:
+        chart_df = pd.DataFrame({
+            "Score": [s["score"] for s in scored],
+            "Base score": [s.get("base_score") for s in scored],
+        }, index=pd.to_datetime([s["timestamp"] for s in scored]))
+        st.line_chart(chart_df)
+        improvement = scored[-1]["score"] - scored[0]["score"]
+        direction = "up" if improvement > 0 else ("down" if improvement < 0 else "unchanged")
+        st.caption(
+            f"{len(scored)} scored sessions for {chosen_swimmer}. "
+            f"Score is {direction} {abs(improvement):.2f} from the first to the most recent session."
+        )
+    elif len(scored) == 1:
+        st.info(f"Only one scored session for {chosen_swimmer} so far — a trend line needs at least two.")
+    else:
+        st.info(f"No scored sessions for {chosen_swimmer} yet.")
+
+    st.markdown("**Still needs work**")
+    if not athlete_sessions:
+        return
+
+    latest = athlete_sessions[-1]
+    deductions = latest.get("deductions")
+    official_keys = latest.get("official_keys")
+
+    if deductions is None or official_keys is None:
+        st.caption(
+            "This athlete's most recent session was saved before deduction "
+            "details started being tracked — analyze a new video for them "
+            "to enable this list."
+        )
+        return
+
+    outstanding = [
+        (key, deductions.get(key, 0), deductions.get(f"{key}_degrees"))
+        for key in official_keys
+        if isinstance(deductions.get(key), (int, float)) and deductions.get(key, 0) > 0
+    ]
+    outstanding.sort(key=lambda x: x[1], reverse=True)
+
+    if not outstanding:
+        st.success(f"No outstanding deductions in {chosen_swimmer}'s most recent session ({latest['timestamp']}).")
+        return
+
+    st.caption(f"From the most recent session ({latest['timestamp']}):")
+    for key, value, degrees in outstanding:
+        label = DEDUCTION_LABELS.get(key, key.replace("_", " ").title())
+        measured = f" — measured {degrees:.2f}" if degrees is not None else ""
+        st.markdown(f"- **{label}**: -{value:.2f}{measured}")
+
+
 def render_history():
     st.markdown('<div class="sa-section-label">History</div>', unsafe_allow_html=True)
     st.caption(
@@ -707,6 +787,9 @@ def render_history():
         session_store.clear_all_sessions()
         st.rerun()
 
+    render_athlete_progress(sessions)
+
+    st.markdown('<div class="sa-section-label">All sessions</div>', unsafe_allow_html=True)
     for s in sessions:
         score_str = f"{s['score']:.2f}/10" if s.get("score") is not None else "None"
         with st.expander(f"{s['swimmer_id']} - {score_str} ({s['timestamp']})"):
