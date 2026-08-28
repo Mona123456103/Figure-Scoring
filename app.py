@@ -96,14 +96,13 @@ st.markdown(
 st.markdown(
     """
     <div class="bc-hero">
-        <h1>🏊 Barracuda Tracker</h1>
+        <h1>Barracuda Tracker</h1>
         <p>Upload synchronized swimming footage for AI pose tracking, waterline detection,
         and a FINA-aligned barracuda score — automatically.</p>
         <div class="bc-badges">
-            <span class="bc-badge">🤖 RTMPose AI tracking</span>
-            <span class="bc-badge">🌊 Above + underwater</span>
-            <span class="bc-badge">📊 FINA-style scoring</span>
-            <span class="bc-badge">🎯 Kalman-smoothed data</span>
+            <span class="bc-badge">RTMPose AI tracking</span>
+            <span class="bc-badge">Above + underwater</span>
+            <span class="bc-badge">FINA-style scoring</span>
         </div>
     </div>
     """,
@@ -112,7 +111,7 @@ st.markdown(
 
 # ── Sidebar: previous sessions ─────────────────────────────────────────────
 with st.sidebar:
-    st.header("📚 Previous Sessions")
+    st.header("Previous Sessions")
     st.caption(
         "⚠️ Not persistent on free-tier hosting — sessions are lost if the "
         "app restarts or sleeps. Local `streamlit run` keeps them on disk."
