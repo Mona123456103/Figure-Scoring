@@ -50,6 +50,24 @@ import time
 # ============================================================================
 
 IGNORE_TOP_PERCENT = 0.35   # above-water single-video tent zone mask
+
+# Speed optimization — caps the SAVED/downloadable annotated video's width.
+# Detection always runs on the full-resolution source frame first (this
+# has zero effect on tracking or scoring, which reads the CSV, never the
+# video pixels); only the final rendered frame gets scaled down before
+# being handed to the video encoder. Encoding cost scales with pixel
+# count, so for a 4K or 1080p phone video this cuts encoding time
+# substantially. Videos already at or under this width are written
+# unchanged.
+MAX_OUTPUT_VIDEO_WIDTH = 1280
+
+
+def _output_video_size(w, h, max_width=MAX_OUTPUT_VIDEO_WIDTH):
+    if w <= max_width:
+        return w, h
+    scale = max_width / w
+    return max_width, max(2, int(round(h * scale)) // 2 * 2)  # keep height even (codec-friendly)
+
 MAX_FRAMES_LOST = 30
 SHORT_GAP_HOLD_FRAMES = 5   # hold last known position through brief gaps only
 RELOCK_CHECK_INTERVAL = 45
@@ -530,6 +548,18 @@ class ImprovedKalmanFilter1D:
 
 
 def _kalman_filter_dataframe(df, landmarks):
+    """Same Kalman math and same sequential order as before — only the
+    per-row access pattern changed. The old version called df.iterrows()
+    once per joint-axis pass (~30 passes for a typical joint set), and
+    iterrows() reconstructs the ENTIRE row (every column, not just the 2
+    actually used) into a pandas Series on every single row, every pass.
+    For a ~600-frame video that's roughly 18,000 full-row reconstructions
+    of a 70-100 column dataframe just to read 2 values each time. Pulling
+    the needed columns out as plain numpy arrays once per pass removes
+    that overhead entirely — the numeric output is identical, only the
+    access pattern changed (verified: see the numeric-equivalence test
+    this was checked against before deploying)."""
+    n = len(df)
     for joint in landmarks:
         for axis in ['y', 'x']:
             col = f'{joint}_{axis}'
@@ -542,13 +572,23 @@ def _kalman_filter_dataframe(df, landmarks):
             kf = ImprovedKalmanFilter1D()
             kf.x[0] = df.loc[first_idx, col]
             kf.initialized = True
-            filtered = []
-            for _, row in df.iterrows():
-                m = row[col] if not pd.isna(row[col]) else None
-                c = row[vis_col] if vis_col in df.columns and not pd.isna(row[vis_col]) else 1.0
+
+            col_values = df[col].to_numpy()
+            vis_values = df[vis_col].to_numpy() if vis_col in df.columns else None
+
+            filtered = [None] * n
+            for i in range(n):
+                raw_m = col_values[i]
+                m = None if pd.isna(raw_m) else raw_m
+                if vis_values is not None:
+                    raw_c = vis_values[i]
+                    c = 1.0 if pd.isna(raw_c) else raw_c
+                else:
+                    c = 1.0
                 if m is not None and kf.is_outlier(m):
                     m = None
-                filtered.append(kf.filter(m, c))
+                filtered[i] = kf.filter(m, c)
+
             df[f'{joint}_{axis}_raw'] = df[col]
             df[col] = filtered
     return df
@@ -1310,8 +1350,9 @@ def process_video_above_water(input_path, output_path, water_level=None,
     output_path.parent.mkdir(parents=True, exist_ok=True)
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    out_w, out_h = _output_video_size(w, h)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(str(output_path), fourcc, fps, (w, h))
+    out = cv2.VideoWriter(str(output_path), fourcc, fps, (out_w, out_h))
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
     frame_count = 0
@@ -1321,6 +1362,8 @@ def process_video_above_water(input_path, output_path, water_level=None,
             break
         best_person = tracker.process_frame(frame, frame_count, fps, water_level)
         annotated = draw_frame_above(frame, best_person, water_level, frame_count, max_frames)
+        if (out_w, out_h) != (w, h):
+            annotated = cv2.resize(annotated, (out_w, out_h), interpolation=cv2.INTER_AREA)
         out.write(annotated)
         frame_count += 1
         if progress_callback:
@@ -1353,8 +1396,9 @@ def process_video_underwater(input_path, output_path, water_level=None,
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    out_w, out_h = _output_video_size(w, h)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(str(output_path), fourcc, fps, (w, h))
+    out = cv2.VideoWriter(str(output_path), fourcc, fps, (out_w, out_h))
 
     frame_count = 0
     while frame_count < max_frames:
@@ -1363,6 +1407,8 @@ def process_video_underwater(input_path, output_path, water_level=None,
             break
         best_person = tracker.process_frame(frame, frame_count, fps, water_level)
         annotated = draw_frame_underwater(frame, best_person, water_level, frame_count, max_frames)
+        if (out_w, out_h) != (w, h):
+            annotated = cv2.resize(annotated, (out_w, out_h), interpolation=cv2.INTER_AREA)
         out.write(annotated)
         frame_count += 1
         if progress_callback:
@@ -1672,8 +1718,9 @@ def process_video_walticam(input_path, output_path, mode='performance',
 
     max_frames = min(int(max_duration * fps), total) if max_duration else total
 
+    out_w, out_h = _output_video_size(w, h)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(str(output_path), fourcc, fps, (w, h))
+    out = cv2.VideoWriter(str(output_path), fourcc, fps, (out_w, out_h))
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
     frame_count = 0
@@ -1698,6 +1745,8 @@ def process_video_walticam(input_path, output_path, mode='performance',
         if below_result is not None:
             draw_walticam_skeleton(viz, below_result[0], below_result[1], offset_y=split_y, water_y=below_wl_y)
 
+        if (out_w, out_h) != (w, h):
+            viz = cv2.resize(viz, (out_w, out_h), interpolation=cv2.INTER_AREA)
         out.write(viz)
         frame_count += 1
         if progress_callback:
