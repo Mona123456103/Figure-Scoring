@@ -380,6 +380,35 @@ def render_home():
 # ============================================================================
 # ANALYZE PAGE
 # ============================================================================
+def render_model_preload_control():
+    """Lets the user trigger the slow one-time model load ahead of time
+    (e.g. while they're still getting their video ready), instead of it
+    always landing on whichever video they process first. Calls the same
+    cached factory functions the actual processing calls use, so once
+    warmed here, processing a video afterward reuses the exact same
+    loaded model with zero extra load time."""
+    if st.session_state.get("models_preloaded"):
+        st.success("Pose model loaded and ready.")
+        return
+
+    col1, col2 = st.columns([3, 2])
+    with col1:
+        st.caption(
+            "The pose model takes about a minute to load the first time "
+            "it's used in a session. Load it now if you'd rather not wait "
+            "once you're ready to process a video — if it's already warm "
+            "from a recent video on this app, this will be quick instead."
+        )
+    with col2:
+        if st.button("Load pose model now", use_container_width=True):
+            with st.spinner("Loading pose model..."):
+                _cached_pose_tracker("performance", 1)
+                _cached_pose_tracker_halpe("performance", 1, "above")
+                _cached_pose_tracker_halpe("performance", 1, "below")
+            st.session_state.models_preloaded = True
+            st.rerun()
+
+
 def render_analyze():
     st.markdown('<div class="sa-section-label">Analyze</div>', unsafe_allow_html=True)
     top_row1, top_row2 = st.columns([4, 2])
@@ -392,6 +421,8 @@ def render_analyze():
     with top_row2:
         if st.button("How should I film this?", use_container_width=True):
             show_filming_guide_dialog()
+
+    render_model_preload_control()
 
     chosen = dict(mode="performance", det_frequency=1)
     waterline_value = None
@@ -584,6 +615,7 @@ def render_analyze():
                         with st.spinner("Loading pose model (first video in a session takes about a minute; reused after that)..."):
                             above_pt = _cached_pose_tracker_halpe(chosen["mode"], chosen["det_frequency"], "above")
                             below_pt = _cached_pose_tracker_halpe(chosen["mode"], chosen["det_frequency"], "below")
+                            st.session_state.models_preloaded = True
                             video_file, above_csv, below_csv = tc.process_video_walticam(
                                 str(input_path), output_path,
                                 mode=chosen["mode"], det_frequency=chosen["det_frequency"],
@@ -668,6 +700,7 @@ def render_analyze():
                     try:
                         with st.spinner("Loading pose model (first video in a session takes about a minute; reused after that)..."):
                             shared_pt = _cached_pose_tracker(chosen["mode"], chosen["det_frequency"])
+                            st.session_state.models_preloaded = True
 
                             above_input = Path(tmp_dir) / above_file.name
                             with open(above_input, "wb") as f:
