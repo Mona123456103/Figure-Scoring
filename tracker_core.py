@@ -1173,12 +1173,29 @@ def detect_waterline_from_poses(video_path, pose_tracker_fn):
     h_frame = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     w_frame = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 
-    def _detect_with_retry(frame):
+    # Speed fix: previously, when Pass 2 or Pass 3 triggered, _scan
+    # restarted from frame 0 and re-ran full pose inference on every frame
+    # Pass 1 (and Pass 2) had ALREADY computed — same frame, same
+    # preprocessing (_detect_with_retry is deterministic), same result,
+    # just thrown away and recomputed. That's exactly the case on the
+    # harder videos (the ones needing Pass 2/3 at all), which are also
+    # the ones that already feel the slowest. Caching inference results
+    # by frame number across passes makes Pass 2 reuse Pass 1's first 100
+    # frames for free, and Pass 3 reuse everything Pass 1+2 already
+    # computed — this changes NOTHING about which frames get scanned or
+    # what candidates pass validation, only eliminates repeat inference
+    # calls on frames already seen.
+    _inference_cache = {}
+
+    def _detect_with_retry(frame_num, frame):
+        if frame_num in _inference_cache:
+            return _inference_cache[frame_num]
         keypoints, scores = pose_tracker_fn(quick_enhance(frame))
-        if keypoints is not None and len(keypoints) > 0:
-            return keypoints, scores
-        strong = cv2.convertScaleAbs(frame, alpha=1.6, beta=35)
-        return pose_tracker_fn(strong)
+        if keypoints is None or len(keypoints) == 0:
+            strong = cv2.convertScaleAbs(frame, alpha=1.6, beta=35)
+            keypoints, scores = pose_tracker_fn(strong)
+        _inference_cache[frame_num] = (keypoints, scores)
+        return keypoints, scores
 
     def _scan(max_frames, require_horizontal):
         heads, shoulders, hips = [], [], []
@@ -1188,7 +1205,7 @@ def detect_waterline_from_poses(video_path, pose_tracker_fn):
             ret, frame = cap.read()
             if not ret:
                 break
-            keypoints, scores = _detect_with_retry(frame)
+            keypoints, scores = _detect_with_retry(frame_num, frame)
             if keypoints is None or len(keypoints) == 0:
                 continue
             for kps, sc in zip(keypoints, scores):
