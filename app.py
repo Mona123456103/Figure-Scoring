@@ -181,7 +181,7 @@ st.markdown(
         box-shadow: 0 8px 24px rgba(8, 145, 178, 0.25);
     }
     .sa-hero h1 { color: white; margin: 0 0 8px 0; font-size: 2.1rem; }
-    .sa-hero p { color: rgba(255,255,255,0.92); margin: 0; font-size: 1.05rem; line-height: 1.5; }
+    .sa-hero p { color: rgba(255,255,255,0.92) !important; margin: 0; font-size: 1.05rem; line-height: 1.5; }
     .sa-badges { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
     .sa-badge {
         background: rgba(255,255,255,0.16);
@@ -189,7 +189,7 @@ st.markdown(
         border-radius: 999px;
         padding: 4px 12px;
         font-size: 0.78rem;
-        color: white;
+        color: white !important;
         display: inline-block;
     }
 
@@ -201,7 +201,7 @@ st.markdown(
         height: 100%;
     }
     .sa-card h4 { margin: 0 0 6px 0; font-size: 1.02rem; }
-    .sa-card p { margin: 0; font-size: 0.92rem; color: #475569; line-height: 1.5; }
+    .sa-card p { margin: 0; font-size: 0.92rem; color: #475569 !important; line-height: 1.5; }
 
     /* Filming-tip images */
     .sa-fig-caption { font-size: 0.85rem; color: #64748b; text-align: center; margin-top: 6px; }
@@ -223,8 +223,8 @@ st.markdown(
         margin: 8px 0 18px 0;
         text-align: center;
     }
-    .sa-score-number { font-size: 3.2rem; font-weight: 700; color: #0e7490; line-height: 1; }
-    .sa-score-max { font-size: 1.1rem; color: #64748b; font-weight: 500; }
+    .sa-score-number { font-size: 3.2rem; font-weight: 700; color: #0e7490 !important; line-height: 1; }
+    .sa-score-max { font-size: 1.1rem; color: #64748b !important; font-weight: 500; }
     .sa-score-assessment {
         display: inline-block; margin-top: 10px; padding: 4px 14px;
         border-radius: 999px; font-size: 0.85rem; font-weight: 600;
@@ -236,6 +236,85 @@ st.markdown(
     }
 
     .sa-footer { text-align: center; color: #94a3b8; font-size: 0.8rem; margin-top: 40px; }
+
+    /* ---------------------------------------------------------------
+       AESTHETIC FIXES ONLY — none of this touches tracking, scoring,
+       or speed. The platform's current default styling for plain text,
+       widget labels, buttons, and the file uploader was rendering dark
+       (or invisible) regardless of page background, so these are
+       pinned explicitly using the *real* Streamlit component
+       selectors (verified against Streamlit's own bundled source, not
+       guessed) instead of relying on defaults.
+
+       :where() keeps the broad text-color reset at zero specificity so
+       the sa-* rules above (which set explicit colors for text that's
+       meant to stay white, like the hero and badges) always win
+       without depending on source order.
+       --------------------------------------------------------------- */
+    :where(
+        .stMarkdown,
+        [data-testid="stCaptionContainer"],
+        [data-testid="stWidgetLabel"],
+        [data-testid="stMetricLabel"],
+        [data-testid="stMetricValue"],
+        div[role="radiogroup"] label
+    ) { color: #0f172a !important; }
+
+    button[data-testid^="stBaseButton-secondary"] {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+        border: 1px solid rgba(8,145,178,0.35) !important;
+    }
+    button[data-testid^="stBaseButton-secondary"]:hover {
+        background-color: #ecfeff !important;
+        border-color: #0e7490 !important;
+        color: #0e7490 !important;
+    }
+    button[data-testid^="stBaseButton-secondary"] * { color: inherit !important; }
+
+    button[data-testid^="stBaseButton-primary"] {
+        background-color: #0e7490 !important;
+        border-color: #0e7490 !important;
+        color: #ffffff !important;
+    }
+    button[data-testid^="stBaseButton-primary"]:hover {
+        background-color: #0c6280 !important;
+        border-color: #0c6280 !important;
+    }
+    button[data-testid^="stBaseButton-primary"] * { color: #ffffff !important; }
+
+    div[data-testid="stTextInput"] input,
+    div[data-testid="stTextArea"] textarea,
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="input"] {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+        border-color: rgba(8,145,178,0.25) !important;
+    }
+
+    /* File uploader — target the stable stFileUploader wrapper and its
+       native <section> dropzone (the inner stFileUploaderDropzone
+       testid lives on that <section>, not a <div>, which is why a
+       div-only selector never matched it). Every descendant is set
+       dark first, then the browse button's text is re-lightened —
+       source order makes the later, more specific rule win for
+       elements matched by both. */
+    div[data-testid="stFileUploader"] * { color: #0f172a !important; }
+    div[data-testid="stFileUploader"] section {
+        background-color: #ffffff !important;
+        border: 1px dashed rgba(8,145,178,0.3) !important;
+    }
+    div[data-testid="stFileUploader"] button {
+        background-color: #0f172a !important;
+        border: none !important;
+    }
+    div[data-testid="stFileUploader"] button,
+    div[data-testid="stFileUploader"] button * { color: #ffffff !important; }
+    div[data-testid="stFileChip"] {
+        background-color: #f8fafc !important;
+        border: 1px solid rgba(8,145,178,0.15) !important;
+    }
+    div[data-testid="stFileChip"] * { color: #0f172a !important; }
     </style>
     """,
     unsafe_allow_html=True,
