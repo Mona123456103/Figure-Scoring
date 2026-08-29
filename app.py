@@ -20,6 +20,8 @@ import streamlit as st
 import tempfile
 import time
 import pandas as pd
+import io
+import zipfile
 from pathlib import Path
 
 import tracker_core as tc
@@ -69,6 +71,70 @@ def _cached_pose_tracker(mode, det_frequency):
 @st.cache_resource(show_spinner=False)
 def _cached_pose_tracker_halpe(mode, det_frequency, above_below_role):
     return tc.make_pose_tracker_halpe(mode, det_frequency)
+
+
+# Files bundled into the "download this app" zip on the Home page, so
+# someone can run their own copy with none of the shared hosted app's
+# resource limits (see the concurrent-users discussion this came out of).
+# packages.txt is deliberately NOT included — that file is only for the
+# hosted Streamlit Community Cloud environment's Linux system packages,
+# not needed for a local Windows/Mac/Linux setup.
+SOURCE_FILES_FOR_DOWNLOAD = [
+    "app.py",
+    "tracker_core.py",
+    "scorer.py",
+    "session_store.py",
+    "issue_reports.py",
+    "requirements.txt",
+    "camera_angle_guide.png",
+    "framing_example.png",
+    "LOCAL_SETUP.md",
+]
+
+
+@st.cache_data(show_spinner=False)
+def _build_source_zip():
+    """Zips up everything needed to run this app on someone else's own
+    computer, read directly from the files sitting next to this script —
+    so the download always matches whatever's actually deployed, not a
+    stale hand-copied version. Any listed file that doesn't exist yet
+    (e.g. before LOCAL_SETUP.md has been added to the repo) is skipped
+    rather than failing the whole zip."""
+    buffer = io.BytesIO()
+    included = []
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for filename in SOURCE_FILES_FOR_DOWNLOAD:
+            path = APP_DIR / filename
+            if path.exists():
+                zf.write(path, arcname=filename)
+                included.append(filename)
+    buffer.seek(0)
+    return buffer.getvalue(), included
+
+
+def render_download_source_control():
+    zip_bytes, included_files = _build_source_zip()
+    st.download_button(
+        "Download this app to run on your own computer",
+        data=zip_bytes,
+        file_name="sync-ai-source.zip",
+        mime="application/zip",
+        use_container_width=True,
+        type="primary",
+    )
+    if "LOCAL_SETUP.md" in included_files:
+        st.caption(
+            "Includes a step-by-step setup guide (LOCAL_SETUP.md inside "
+            "the zip) — no coding experience needed. Running your own "
+            "copy means no waiting on anyone else and no shared resource "
+            "limits."
+        )
+    else:
+        st.caption(
+            "Running your own copy means no waiting on anyone else and no "
+            "shared resource limits. You'll need Python installed — "
+            "`pip install -r requirements.txt` then `streamlit run app.py`."
+        )
 
 
 st.set_page_config(
@@ -372,6 +438,17 @@ def render_home():
         "every measured number is shown, whether or not it currently "
         "affects the score."
     )
+
+    st.markdown('<div class="sa-section-label">Run it without the wait</div>', unsafe_allow_html=True)
+    st.write(
+        "This hosted version runs on shared, resource-limited servers — "
+        "usually fine, but only one person can really process a video at "
+        "a time, and heavy use can slow it down for everyone. Running "
+        "your own copy on your own computer sidesteps that completely: "
+        "no sharing, no limits, and your session history actually sticks "
+        "around instead of disappearing if the hosted app goes to sleep."
+    )
+    render_download_source_control()
 
     if st.button("Start analyzing", type="primary"):
         go_to("analyze")
