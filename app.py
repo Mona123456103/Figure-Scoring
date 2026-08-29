@@ -42,6 +42,35 @@ DEDUCTION_LABELS = {
     "head_tuck": "Head tuck",
 }
 
+# Speed fix — loading the pose model is the single biggest cost in this
+# app, and it was happening from scratch on EVERY "Process video" click,
+# even for the second, third, tenth video of the same session, and TWICE
+# per click for Above+Below mode (once for the above tracker, once for
+# underwater — same model, same settings, loaded independently). Cached
+# with st.cache_resource, which is Streamlit's standard mechanism for
+# exactly this — expensive objects (ML models, DB connections) that
+# should be built once and reused across reruns/videos within the same
+# running app, not once per interaction.
+#
+# above_below_role is only used to give Walticam's above/below trackers
+# SEPARATE cached instances rather than one shared one — they're called
+# interleaved (alternating every single frame in the tracking loop), and
+# reusing one live model object across rapidly alternating calls on
+# unrelated image regions isn't something verifiable without the actual
+# rtmlib library, so this stays cautious there specifically. The
+# non-Walticam Above/Below path calls its two trackers sequentially (one
+# fully finishes before the other starts), which is a much lower-risk
+# reuse pattern, so those two safely share one cached instance.
+@st.cache_resource(show_spinner=False)
+def _cached_pose_tracker(mode, det_frequency):
+    return tc.make_pose_tracker(mode, det_frequency)
+
+
+@st.cache_resource(show_spinner=False)
+def _cached_pose_tracker_halpe(mode, det_frequency, above_below_role):
+    return tc.make_pose_tracker_halpe(mode, det_frequency)
+
+
 st.set_page_config(
     page_title=APP_NAME,
     layout="centered",
@@ -552,11 +581,14 @@ def render_analyze():
 
                     progress_bar, update_progress = run_with_progress("Walticam")
                     try:
-                        with st.spinner("Loading pose model (first run downloads it, about 1 minute)..."):
+                        with st.spinner("Loading pose model (first video in a session takes about a minute; reused after that)..."):
+                            above_pt = _cached_pose_tracker_halpe(chosen["mode"], chosen["det_frequency"], "above")
+                            below_pt = _cached_pose_tracker_halpe(chosen["mode"], chosen["det_frequency"], "below")
                             video_file, above_csv, below_csv = tc.process_video_walticam(
                                 str(input_path), output_path,
                                 mode=chosen["mode"], det_frequency=chosen["det_frequency"],
                                 max_duration=max_duration, progress_callback=update_progress,
+                                above_pose_tracker=above_pt, below_pose_tracker=below_pt,
                             )
                         progress_bar.progress(1.0, text="Done.")
 
@@ -634,7 +666,9 @@ def render_analyze():
                     above_video_file = None
                     below_video_file = None
                     try:
-                        with st.spinner("Loading pose model (first run downloads it, about 1 minute)..."):
+                        with st.spinner("Loading pose model (first video in a session takes about a minute; reused after that)..."):
+                            shared_pt = _cached_pose_tracker(chosen["mode"], chosen["det_frequency"])
+
                             above_input = Path(tmp_dir) / above_file.name
                             with open(above_input, "wb") as f:
                                 f.write(above_file.getbuffer())
@@ -645,6 +679,7 @@ def render_analyze():
                                 str(above_input), above_output, waterline_value,
                                 mode=chosen["mode"], det_frequency=chosen["det_frequency"],
                                 max_duration=max_duration, progress_callback=update_above,
+                                pose_tracker=shared_pt,
                             )
                             above_video_file = video_file
                             above_kalman_result = show_results(
@@ -662,6 +697,7 @@ def render_analyze():
                                     str(below_input), below_output, waterline_value,
                                     mode=chosen["mode"], det_frequency=chosen["det_frequency"],
                                     max_duration=max_duration, progress_callback=update_below,
+                                    pose_tracker=shared_pt,
                                 )
                                 below_video_file = video_file
                                 below_kalman_result = show_results(
