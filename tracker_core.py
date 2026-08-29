@@ -610,8 +610,11 @@ def apply_kalman_filter_to_csv(csv_path, landmarks):
 # ============================================================================
 
 class AboveWaterRTMPoseTracker:
-    def __init__(self, mode='performance', det_frequency=1, ignore_top_percent=IGNORE_TOP_PERCENT):
-        self.pose_tracker = make_pose_tracker(mode, det_frequency)
+    def __init__(self, mode='performance', det_frequency=1, ignore_top_percent=IGNORE_TOP_PERCENT, pose_tracker=None):
+        # pose_tracker: pass a pre-built one (e.g. cached by the caller
+        # across videos/trackers) to skip re-loading the model. Defaults
+        # to building its own, so this class still works standalone.
+        self.pose_tracker = pose_tracker if pose_tracker is not None else make_pose_tracker(mode, det_frequency)
         self.ignore_top_percent = ignore_top_percent
         self.tracking_data = []
 
@@ -901,8 +904,8 @@ class AboveWaterRTMPoseTracker:
 # ============================================================================
 
 class RTMPoseUnderwaterTracker:
-    def __init__(self, mode='performance', det_frequency=1):
-        self.pose_tracker = make_pose_tracker(mode, det_frequency)
+    def __init__(self, mode='performance', det_frequency=1, pose_tracker=None):
+        self.pose_tracker = pose_tracker if pose_tracker is not None else make_pose_tracker(mode, det_frequency)
         self.tracking_data = []
 
         self.locked_swimmer = None
@@ -1351,12 +1354,13 @@ def draw_frame_underwater(frame, best_person, water_level, frame_num, total_fram
 
 def process_video_above_water(input_path, output_path, water_level=None,
                                mode='performance', det_frequency=1,
-                               max_duration=60, progress_callback=None):
+                               max_duration=60, progress_callback=None,
+                               pose_tracker=None):
     cap = cv2.VideoCapture(str(input_path))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    tracker = AboveWaterRTMPoseTracker(mode=mode, det_frequency=det_frequency)
+    tracker = AboveWaterRTMPoseTracker(mode=mode, det_frequency=det_frequency, pose_tracker=pose_tracker)
 
     if water_level is None:
         water_level = detect_waterline_from_poses(str(input_path), tracker.pose_tracker)
@@ -1398,7 +1402,8 @@ def process_video_above_water(input_path, output_path, water_level=None,
 
 def process_video_underwater(input_path, output_path, water_level=None,
                               mode='performance', det_frequency=1,
-                              max_duration=60, progress_callback=None):
+                              max_duration=60, progress_callback=None,
+                              pose_tracker=None):
     cap = cv2.VideoCapture(str(input_path))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -1408,7 +1413,7 @@ def process_video_underwater(input_path, output_path, water_level=None,
     if water_level is None:
         water_level = 0.05  # underwater videos: waterline near top of frame by convention
 
-    tracker = RTMPoseUnderwaterTracker(mode=mode, det_frequency=det_frequency)
+    tracker = RTMPoseUnderwaterTracker(mode=mode, det_frequency=det_frequency, pose_tracker=pose_tracker)
     max_frames = min(int(max_duration * fps), total) if max_duration else total
 
     output_path = Path(output_path)
@@ -1446,8 +1451,8 @@ def process_video_underwater(input_path, output_path, water_level=None,
 # ============================================================================
 
 class WalticamAboveTracker:
-    def __init__(self, mode='performance', det_frequency=1):
-        self.pose_tracker = make_pose_tracker_halpe(mode, det_frequency)
+    def __init__(self, mode='performance', det_frequency=1, pose_tracker=None):
+        self.pose_tracker = pose_tracker if pose_tracker is not None else make_pose_tracker_halpe(mode, det_frequency)
         self.tracking_data = []
         self.position_history = []
         self.history_size = 4
@@ -1555,8 +1560,8 @@ class WalticamAboveTracker:
 
 
 class WalticamBelowTracker:
-    def __init__(self, mode='performance', det_frequency=1):
-        self.pose_tracker = make_pose_tracker_halpe(mode, det_frequency)
+    def __init__(self, mode='performance', det_frequency=1, pose_tracker=None):
+        self.pose_tracker = pose_tracker if pose_tracker is not None else make_pose_tracker_halpe(mode, det_frequency)
         self.tracking_data = []
         self.position_history = []
         self.history_size = 4
@@ -1701,9 +1706,19 @@ def draw_walticam_skeleton(viz, person_kps, person_scores, offset_y=0, water_y=N
 
 
 def process_video_walticam(input_path, output_path, mode='performance',
-                            det_frequency=1, max_duration=60, progress_callback=None):
+                            det_frequency=1, max_duration=60, progress_callback=None,
+                            above_pose_tracker=None, below_pose_tracker=None):
     """Split-screen WaltiCam video: top half = above-water, bottom half =
-    underwater. Returns (video_path, above_csv_path, below_csv_path)."""
+    underwater. Returns (video_path, above_csv_path, below_csv_path).
+
+    above_pose_tracker / below_pose_tracker: pass pre-built ones to skip
+    re-loading the model (see AboveWaterRTMPoseTracker's pose_tracker
+    param docstring). Kept as TWO separate objects here rather than one
+    shared instance — above/below calls are interleaved every single
+    frame in the loop below (not sequential like the non-Walticam path),
+    and reusing one live model object across rapidly alternating calls on
+    unrelated image regions isn't something verifiable without the real
+    rtmlib library available, so this stays on the cautious side."""
     input_path = Path(input_path)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1716,8 +1731,8 @@ def process_video_walticam(input_path, output_path, mode='performance',
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     split_y = h // 2
 
-    above_tracker = WalticamAboveTracker(mode=mode, det_frequency=det_frequency)
-    below_tracker = WalticamBelowTracker(mode=mode, det_frequency=det_frequency)
+    above_tracker = WalticamAboveTracker(mode=mode, det_frequency=det_frequency, pose_tracker=above_pose_tracker)
+    below_tracker = WalticamBelowTracker(mode=mode, det_frequency=det_frequency, pose_tracker=below_pose_tracker)
 
     # Sample a handful of frames to detect each half's waterline once.
     sample_count = min(8, max(1, int(fps * 2)))
