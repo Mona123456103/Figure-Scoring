@@ -261,6 +261,12 @@ st.markdown(
         [data-testid="stSpinner"]
     ) { color: #0f172a !important; }
 
+    /* st.table() renders an actual <table> that sets its own explicit
+       text color (not inherited), so the broad reset above can't reach
+       it — this was the "Official deductions" / "Coaching feedback"
+       tables rendering nearly invisible. */
+    table[data-testid="stTableStyledTable"] { color: #0f172a !important; }
+
     /* Radio option text ("Walticam" / "Above / Below" etc.) sits in an
        inner <div> that sets its own color directly from the same theme
        token that was broken elsewhere — it doesn't inherit from the
@@ -725,7 +731,6 @@ def render_analyze():
             ("Back roundness", d.get("back_roundness", 0), d.get("back_roundness_degrees")),
             ("Travel", d.get("travel", 0), d.get("travel_degrees")),
             ("Unroll speed", d.get("unroll_speed", 0), d.get("unroll_speed_degrees")),
-            ("Head tuck (estimated — not judge-confirmed)", d.get("head_tuck", 0), d.get("head_tuck_degrees")),
         ]
         st.markdown("**Official deductions**")
         st.table({
@@ -737,6 +742,7 @@ def render_analyze():
         coaching_rows = [
             ("Underwater bent knee", d.get("underwater_bent_knee", 0), d.get("underwater_bent_knee_degrees")),
             ("Back layout depth (estimated — not judge-confirmed)", d.get("back_layout_depth", 0), d.get("back_layout_depth_value")),
+            ("Head tuck (estimated — not judge-confirmed)", d.get("head_tuck", 0), d.get("head_tuck_degrees")),
         ]
         st.markdown("**Coaching feedback** (measured, not counted toward the score)")
         st.table({
