@@ -256,7 +256,9 @@ st.markdown(
         [data-testid="stCaptionContainer"],
         [data-testid="stWidgetLabel"],
         [data-testid="stMetricLabel"],
-        [data-testid="stMetricValue"]
+        [data-testid="stMetricValue"],
+        [data-testid="stProgress"],
+        [data-testid="stSpinner"]
     ) { color: #0f172a !important; }
 
     /* Radio option text ("Walticam" / "Above / Below" etc.) sits in an
