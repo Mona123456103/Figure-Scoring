@@ -256,9 +256,15 @@ st.markdown(
         [data-testid="stCaptionContainer"],
         [data-testid="stWidgetLabel"],
         [data-testid="stMetricLabel"],
-        [data-testid="stMetricValue"],
-        div[role="radiogroup"] label
+        [data-testid="stMetricValue"]
     ) { color: #0f172a !important; }
+
+    /* Radio option text ("Walticam" / "Above / Below" etc.) sits in an
+       inner <div> that sets its own color directly from the same theme
+       token that was broken elsewhere — it doesn't inherit from the
+       label, so it has to be targeted directly rather than via the
+       ancestor. */
+    div[role="radiogroup"] label * { color: #0f172a !important; }
 
     button[data-testid^="stBaseButton-secondary"] {
         background-color: #ffffff !important;
@@ -558,9 +564,9 @@ def render_model_preload_control():
     with col2:
         if st.button("Load pose model now", use_container_width=True):
             with st.spinner("Loading pose model..."):
-                _cached_pose_tracker("performance", 1)
-                _cached_pose_tracker_halpe("performance", 1, "above")
-                _cached_pose_tracker_halpe("performance", 1, "below")
+                _cached_pose_tracker("lightweight", 4)
+                _cached_pose_tracker_halpe("lightweight", 4, "above")
+                _cached_pose_tracker_halpe("lightweight", 4, "below")
             st.session_state.models_preloaded = True
             st.rerun()
 
@@ -580,7 +586,7 @@ def render_analyze():
 
     render_model_preload_control()
 
-    chosen = dict(mode="performance", det_frequency=1)
+    chosen = dict(mode="lightweight", det_frequency=4)
     waterline_value = None
     max_duration = 60
 
@@ -717,7 +723,7 @@ def render_analyze():
             ("Back roundness", d.get("back_roundness", 0), d.get("back_roundness_degrees")),
             ("Travel", d.get("travel", 0), d.get("travel_degrees")),
             ("Unroll speed", d.get("unroll_speed", 0), d.get("unroll_speed_degrees")),
-            ("Head tuck (not yet calibrated)", d.get("head_tuck", 0), d.get("head_tuck_degrees")),
+            ("Head tuck (estimated — not judge-confirmed)", d.get("head_tuck", 0), d.get("head_tuck_degrees")),
         ]
         st.markdown("**Official deductions**")
         st.table({
@@ -728,7 +734,7 @@ def render_analyze():
 
         coaching_rows = [
             ("Underwater bent knee", d.get("underwater_bent_knee", 0), d.get("underwater_bent_knee_degrees")),
-            ("Back layout depth (not yet calibrated)", d.get("back_layout_depth", 0), d.get("back_layout_depth_value")),
+            ("Back layout depth (estimated — not judge-confirmed)", d.get("back_layout_depth", 0), d.get("back_layout_depth_value")),
         ]
         st.markdown("**Coaching feedback** (measured, not counted toward the score)")
         st.table({
